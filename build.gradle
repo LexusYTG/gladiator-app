@@ -1,0 +1,146 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace 'com.gladiator'
+    compileSdk 35
+    ndkVersion '29.0.14206865'
+
+    defaultConfig {
+        applicationId "com.glads1"
+        minSdk 24
+        targetSdk 28
+        versionCode 1
+        versionName "0.1"
+        ndk { abiFilters 'arm64-v8a' }
+        manifestPlaceholders.TERMUX_PACKAGE_NAME = "com.glads1"
+        manifestPlaceholders.TERMUX_APP_NAME = "Gladiator"
+        buildConfigField "String", "TERMUX_PACKAGE_VARIANT", "\"apt-android-7\""
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+        coreLibraryDesugaringEnabled true
+    }
+
+    buildTypes {
+        release { minifyEnabled false }
+    }
+
+    androidResources {
+        noCompress 'zst'
+    }
+
+    packagingOptions {
+        jniLibs { useLegacyPackaging = true }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+}
+
+dependencies {
+    implementation project(':lorie')
+    implementation project(':termux-shared')
+    implementation project(':terminal-emulator')
+    implementation project(':terminal-view')
+
+    implementation "androidx.annotation:annotation:1.9.0"
+    implementation "androidx.core:core:1.13.1"
+    implementation "androidx.appcompat:appcompat:1.6.1"
+    implementation "androidx.drawerlayout:drawerlayout:1.2.0"
+    implementation "androidx.preference:preference:1.2.1"
+    implementation "androidx.viewpager:viewpager:1.0.0"
+    implementation "com.google.android.material:material:1.12.0"
+    implementation "com.google.guava:guava:24.1-jre"
+    implementation "io.noties.markwon:core:${markwonVersion}"
+    implementation "io.noties.markwon:ext-strikethrough:${markwonVersion}"
+    implementation "io.noties.markwon:linkify:${markwonVersion}"
+    implementation "io.noties.markwon:recycler:${markwonVersion}"
+    implementation "org.lsposed.hiddenapibypass:hiddenapibypass:6.1"
+    implementation "commons-io:commons-io:2.5"
+    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:1.1.5"
+}
+
+configurations.all {
+    resolutionStrategy {
+        force 'com.google.guava:listenablefuture:9999.0-empty-to-avoid-conflict-with-guava'
+    }
+}
+
+// ============================================================
+// Bootstrap auto-pack
+// Zippea bootstrap/ -> app/src/main/assets/bootstrap-aarch64.zip
+// Solo corre si algún archivo en bootstrap/ cambió (Gradle caching).
+// ============================================================
+tasks.register('zipBootstrap') {
+    def bootstrapDir = rootProject.file('bootstrap')
+    def outZip = file("${projectDir}/src/main/assets/bootstrap-aarch64.zip")
+    def assetsDir = file("${projectDir}/src/main/assets")
+
+    if (bootstrapDir.exists()) {
+        inputs.dir(bootstrapDir)
+        outputs.file(outZip)
+    }
+
+    doLast {
+        if (!bootstrapDir.exists()) {
+            logger.warn("zipBootstrap: ${bootstrapDir} no existe, saltando")
+            return
+        }
+        assetsDir.mkdirs()
+        if (outZip.exists()) outZip.delete()
+
+        ant.zip(destfile: outZip, level: 1) {
+            fileset(dir: bootstrapDir) {
+                exclude(name: '.git/**')
+                exclude(name: '.gitignore')
+            }
+        }
+        logger.lifecycle("zipBootstrap: ${outZip.name} -> ${(outZip.length() / 1024 / 1024)} MB")
+    }
+}
+
+// Engancha a cualquier tarea merge*Assets que Gradle cree
+tasks.whenTaskAdded { t ->
+    if (t.name.startsWith('merge') && t.name.endsWith('Assets')) {
+        t.dependsOn 'zipBootstrap'
+    }
+}
+
+// ============================================================
+// Logging de build
+// Imprime fases explicitas para ver que hace cada etapa.
+// ============================================================
+def gladiatorBuildCounter = new java.util.concurrent.atomic.AtomicInteger(0)
+gradle.taskGraph.beforeTask { task ->
+    def n = task.name
+    def label = null
+    if (n == 'zipBootstrap') label = 'Empaquetando bootstrap -> bootstrap-aarch64.zip'
+    else if (n.startsWith('merge') && n.endsWith('Assets')) label = 'Fusionando assets (bootstrap + recursos)'
+    else if (n.startsWith('merge') && n.endsWith('JniLibFolders')) label = 'Copiando .so nativos al APK'
+    else if (n.startsWith('merge') && n.endsWith('DebugResources')) label = 'Fusionando recursos Android'
+    else if (n.startsWith('compile') && n.endsWith('JavaWithJavac')) label = "Compilando Java (" + task.project.name + ")"
+    else if (n.startsWith('configureCMake') || n.startsWith('buildCMake') || n.startsWith('externalNativeBuild')) label = "Compilando C/C++ nativo (" + task.project.name + ")"
+    else if (n.startsWith('package') && n.endsWith('Debug')) label = 'Empaquetando APK debug'
+    else if (n == 'assembleDebug') label = 'Ensamblado final'
+    if (label != null) {
+        def step = gladiatorBuildCounter.incrementAndGet()
+        println ""
+        println "  [" + step + "] " + label
+        println "       (" + n + ")"
+    }
+}
+
+gradle.taskGraph.afterTask { task ->
+    if (task.name == 'assembleDebug') {
+        def apk = file("${projectDir}/build/outputs/apk/debug/app-debug.apk")
+        if (apk.exists()) {
+            def mb = (apk.length() / 1024 / 1024).round(1)
+            println ""
+            println "  OK -> APK listo: app-debug.apk (" + mb + " MB)"
+            println ""
+        }
+    }
+}

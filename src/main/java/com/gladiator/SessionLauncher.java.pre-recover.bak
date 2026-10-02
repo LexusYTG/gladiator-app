@@ -1,0 +1,103 @@
+package com.gladiator;
+
+import android.content.Context;
+import android.util.Log;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.util.ArrayList;
+import java.util.List;
+
+public class SessionLauncher {
+    private static final String TAG = "GladiatorLaunch";
+
+    public interface Progress { void onProgress(String msg, int pct); }
+
+    /**
+     * Ejecuta session-bootstrap.sh con CONTAINER_NAME=<nombre>.
+     * El script hace TODO: extrae rootfs, instala WM, arranca proot-distro login.
+     */
+    public static Process start(Context ctx, Container container, Progress cb) throws Exception {
+        File prefix = BootstrapInstaller.prefixDir(ctx);
+        File bash = new File(prefix, "bin/bash");
+        File script = new File(prefix, "bin/session-bootstrap.sh");
+        File progressFile = new File(prefix, "var/log/progress.txt");
+        progressFile.getParentFile().mkdirs();
+        if (progressFile.exists()) progressFile.delete();
+
+        File tmp = new File(prefix, "tmp");
+        tmp.mkdirs();
+        File home = new File(prefix, "home");
+        home.mkdirs();
+
+        List<String> cmd = new ArrayList<>();
+        cmd.add(bash.getAbsolutePath());
+        cmd.add(script.getAbsolutePath());
+
+        ProcessBuilder pb = new ProcessBuilder(cmd);
+        pb.environment().put("PREFIX", prefix.getAbsolutePath());
+        pb.environment().put("HOME", home.getAbsolutePath());
+        pb.environment().put("TMPDIR", tmp.getAbsolutePath());
+        pb.environment().put("PROOT_TMP_DIR", tmp.getAbsolutePath());
+        pb.environment().put("PROOT_NO_SECCOMP", "1");
+        pb.environment().put("LD_LIBRARY_PATH", new File(prefix, "lib").getAbsolutePath());
+        // Esto es lo que hace que Termux sea Termux: libtermux-exec.so traduce
+        // /bin/bash, /usr/bin/env, etc a $PREFIX/bin/... via LD_PRELOAD.
+        pb.environment().put("LD_PRELOAD", new File(prefix, "lib/libtermux-exec.so").getAbsolutePath());
+        pb.environment().put("PATH", prefix.getAbsolutePath() + "/bin:" + prefix.getAbsolutePath() + "/bin/applets");
+        pb.environment().put("TERM", "xterm-256color");
+        pb.environment().put("LANG", "C.UTF-8");
+        pb.environment().put("COLORTERM", "truecolor");
+        pb.environment().put("CONTAINER_NAME", container.name);
+        pb.environment().put("X11_DISPLAY", ":0");
+        pb.environment().put("PROGRESS_FILE", progressFile.getAbsolutePath());
+        pb.redirectErrorStream(true);
+
+        Log.i(TAG, "start: " + String.join(" ", cmd) + "  CONTAINER_NAME=" + container.name);
+        Process p = pb.start();
+
+        // Reader del stdout → log
+        new Thread(() -> {
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                String line;
+                while ((line = r.readLine()) != null) Log.i(TAG + "/ctn", line);
+            } catch (Exception ignored) {}
+        }, "ctn-logger").start();
+
+        // Poller del progress file → callback
+        if (cb != null) {
+            new Thread(() -> {
+                long last = 0;
+                try {
+                    while (p.isAlive()) {
+                        if (progressFile.exists() && progressFile.length() > last) {
+                            try (BufferedReader r = new BufferedReader(new InputStreamReader(
+                                    new java.io.FileInputStream(progressFile)))) {
+                                String line;
+                                while ((line = r.readLine()) != null) {
+                                    if (line.startsWith("PROGRESS|")) {
+                                        String[] parts = line.split("\\|", 3);
+                                        if (parts.length >= 3) {
+                                            try {
+                                                int pct = Integer.parseInt(parts[1]);
+                                                cb.onProgress(parts[2], pct);
+                                            } catch (NumberFormatException ignored) {}
+                                        }
+                                    } else if (line.startsWith("ERROR|")) {
+                                        cb.onProgress(line.substring(6), 100);
+                                    }
+                                }
+                                last = progressFile.length();
+                            }
+                        }
+                        Thread.sleep(500);
+                    }
+                } catch (Exception ignored) {}
+            }, "progress-poller").start();
+        }
+
+        return p;
+    }
+}

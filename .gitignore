@@ -1,0 +1,7 @@
+build/
+.gradle/
+*.apk
+*.log
+local.properties
+.DS_Store
+src/main/assets/bootstrap-aarch64.zip
