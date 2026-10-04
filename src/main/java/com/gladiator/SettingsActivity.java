@@ -101,6 +101,17 @@ public class SettingsActivity extends Activity {
                     updateSummary();
                 }));
 
+        LinearLayout inputCard = section(list, "Modo de mouse");
+        inputCard.addView(Ui.bodyText(this,
+                "Botones volumen: subir = click izq, bajar = click der. " +
+                "Gestos: 1 dedo tap = click izq, 2 dedos tap = click der, 2 dedos drag = scroll.",
+                11, Ui.MUTED));
+        inputCard.addView(Ui.vspace(this, 10));
+        inputCard.addView(Ui.choices(this, Prefs.INPUT_MODES,
+                Math.max(0, Math.min(prefs.inputMode(), Prefs.INPUT_MODES.length - 1)), true, i -> {
+                    prefs.setInputMode(i);
+                }));
+
         LinearLayout ctrlCard = Ui.card(this, Ui.MAGENTA);
         ctrlCard.addView(Ui.label(this, "CONTROLES EN PANTALLA", 10, Ui.MUTED, true, 0.2f));
         ctrlCard.addView(Ui.vspace(this, 10));

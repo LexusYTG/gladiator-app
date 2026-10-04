@@ -142,7 +142,13 @@ public class LauncherActivity extends Activity {
               + "Scutum (GLES), Spatha (Vulkan) y Sesar (escritorio) son proyectos "
               + "en desarrollo continuo. Bugs visuales, cuelgues y comportamientos "
               + "inesperados son esperables. No hay garantia de que las aplicaciones "
-              + "corran sin problemas.";
+              + "corran sin problemas.\n\n"
+
+              + "CONFIGURACION\n"
+              + "Revisa la seccion de Ajustes para personalizar el entorno si no "
+              + "te gusta como esta configurado: resolucion, profundidad de color, "
+              + "calidad grafica, modo de mouse (botones de volumen vs gestos), y "
+              + "controles en pantalla.";
 
         android.widget.ScrollView sv = new android.widget.ScrollView(this);
         sv.setVerticalScrollBarEnabled(true);

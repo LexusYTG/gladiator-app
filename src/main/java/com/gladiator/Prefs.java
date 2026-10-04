@@ -12,6 +12,7 @@ public class Prefs {
     };
     public static final String[] DEPTHS = {"16", "24", "32"};
     public static final String[] QUALITY = {"Rendimiento", "Balance", "Calidad"};
+    public static final String[] INPUT_MODES = {"Botones volumen", "Gestos"};
 
     private final SharedPreferences sp;
 
@@ -27,6 +28,9 @@ public class Prefs {
 
     public int quality() { return sp.getInt("quality", 1); }
     public void setQuality(int v) { sp.edit().putInt("quality", v).apply(); }
+
+    public int inputMode() { return sp.getInt("input_mode", 0); }
+    public void setInputMode(int v) { sp.edit().putInt("input_mode", v).apply(); }
 
     public String screenSpec() { return resolution() + "x" + depth(); }
 }

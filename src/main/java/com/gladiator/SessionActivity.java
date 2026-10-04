@@ -28,6 +28,7 @@ public class SessionActivity extends Activity {
     private CustomKeyboard keyboard;
     private Container container;
     private int xw = 1280, xh = 720;
+    private int inputMode = 0;  // 0=botones volumen, 1=gestos
     private volatile boolean xserverConnected = false;
 
     private volatile boolean volUpHeld = false;
@@ -79,6 +80,7 @@ public class SessionActivity extends Activity {
                 xh = Integer.parseInt(res[1]);
             } catch (Exception ignored) {}
         }
+        inputMode = p.inputMode();
 
         Ui.styleWindow(this);
 
@@ -171,6 +173,8 @@ public class SessionActivity extends Activity {
             float scrollAcc = 0;
             boolean moved = false;
             boolean multiTouch = false;
+            boolean multiMoved = false;
+            float multiDownX, multiDownY;
             boolean cursorInited = false;
 
             @Override public boolean onTouch(View view, MotionEvent e) {
@@ -187,20 +191,32 @@ public class SessionActivity extends Activity {
                         multiTouch = true;
                         lastY = e.getY(0);
                         scrollAcc = 0;
+                        multiDownX = e.getX(0);
+                        multiDownY = e.getY(0);
+                        multiMoved = false;
                     } else if (action == MotionEvent.ACTION_MOVE) {
                         float dy = e.getY(0) - lastY;
                         lastY = e.getY(0);
                         scrollAcc += dy;
+                        if (Math.abs(e.getX(0) - multiDownX) > TAP_THRESHOLD
+                                || Math.abs(e.getY(0) - multiDownY) > TAP_THRESHOLD) {
+                            multiMoved = true;
+                        }
                         while (Math.abs(scrollAcc) >= SCROLL_STEP) {
                             int sign = scrollAcc > 0 ? -120 : 120;
                             v.sendMouseWheelEvent(0, sign);
                             scrollAcc += (scrollAcc > 0 ? -SCROLL_STEP : SCROLL_STEP);
                         }
-                    } else if (action == MotionEvent.ACTION_POINTER_UP
-                            || action == MotionEvent.ACTION_UP
+                    } else if (action == MotionEvent.ACTION_UP
                             || action == MotionEvent.ACTION_CANCEL) {
+                        // Modo gestos: si fue tap con 2 dedos (no se movio), click derecho
+                        if (inputMode == 1 && multiTouch && !multiMoved) {
+                            v.sendMouseEvent(0f, 0f, 3, true, true);
+                            v.sendMouseEvent(0f, 0f, 3, false, true);
+                        }
                         multiTouch = false;
                         scrollAcc = 0;
+                        multiMoved = false;
                     }
                     return true;
                 }
@@ -238,6 +254,8 @@ public class SessionActivity extends Activity {
 
     @Override
     public boolean onKeyDown(int keyCode, android.view.KeyEvent event) {
+        // Modo gestos: dejar pasar las teclas de volumen al sistema
+        if (inputMode == 1) return super.onKeyDown(keyCode, event);
         if (event.getRepeatCount() > 0) return true;
         if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) {
             if (!volUpHeld) { volUpHeld = true; sendMouseButton(1, true); }
@@ -252,6 +270,7 @@ public class SessionActivity extends Activity {
 
     @Override
     public boolean onKeyUp(int keyCode, android.view.KeyEvent event) {
+        if (inputMode == 1) return super.onKeyUp(keyCode, event);
         if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) {
             if (volUpHeld) { volUpHeld = false; sendMouseButton(1, false); }
             return true;
