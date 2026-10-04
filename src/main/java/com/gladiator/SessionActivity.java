@@ -28,6 +28,7 @@ public class SessionActivity extends Activity {
     private CustomKeyboard keyboard;
     private Container container;
     private int xw = 1280, xh = 720;
+    private volatile boolean xserverConnected = false;
 
     private volatile boolean volUpHeld = false;
     private volatile boolean volDownHeld = false;
@@ -36,6 +37,7 @@ public class SessionActivity extends Activity {
         @Override
         public void onReceive(Context context, Intent intent) {
             if (!CmdEntryPoint.ACTION_START.equals(intent.getAction())) return;
+            if (xserverConnected) return;
             Bundle bundle = intent.getBundleExtra(null);
             IBinder binder = bundle == null ? null : bundle.getBinder(null);
             if (binder == null) return;
@@ -45,6 +47,7 @@ public class SessionActivity extends Activity {
                 ParcelFileDescriptor fd = svc.getXConnection();
                 if (fd != null) {
                     lorieView.connect(fd.detachFd());
+                    xserverConnected = true;
                     GladiatorLog.log("Session", "LorieView conectado");
                     runOnUiThread(() -> {
                         // bootPanel/bgView siguen visibles hasta DONE
