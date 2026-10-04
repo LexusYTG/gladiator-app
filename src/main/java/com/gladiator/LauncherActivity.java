@@ -99,13 +99,29 @@ public class LauncherActivity extends Activity {
         String txt =
                 "GLADIATOR ES EXPERIMENTAL.\n\n"
 
+              + "BETA\n"
+              + "Esta es la version 1.0 beta. El proyecto entero esta en desarrollo "
+              + "activo. Cualquier error puede ser corregido en versiones futuras, "
+              + "pero no se garantiza soporte ni compatibilidad. Probalo bajo tu "
+              + "propio riesgo.\n\n"
+
               + "COMPATIBILIDAD\n"
               + "Solo probado con GPU Mali (Mali-G52 MC2). No preparado para Adreno, "
-              + "PowerVR ni otros.\n\n"
+              + "PowerVR, otros Mali ni otros GPUs. En otro hardware puede no arrancar.\n\n"
 
-              + "PESO\n"
+              + "PESO Y DESCARGA\n"
               + "El entorno completo puede ocupar entre 2 y 3 GB de almacenamiento. "
               + "Asegurate de tener espacio libre suficiente.\n\n"
+              + "La app descarga paquetes desde internet la primera vez que arranca "
+              + "el container: Ubuntu base, JWM (window manager), XTerm (terminal), "
+              + "fuentes y otras dependencias. Eso consume datos moviles si no estas "
+              + "en WiFi.\n\n"
+
+              + "TIEMPO DE ARRANQUE\n"
+              + "El primer arranque de cada entorno puede tardar hasta 10 minutos, "
+              + "dependiendo de tu conexion. La pantalla de carga muestra un "
+              + "cronometro: verde = normal, naranja = esta tardando, rojo = "
+              + "probablemente se colgo o se corto la red.\n\n"
 
               + "ARRANQUE\n"
               + "Pueden aparecer fallos criticos al iniciar el entorno. Si la sesion "
@@ -117,8 +133,16 @@ public class LauncherActivity extends Activity {
               + "fallos conocidos en el entorno X11.\n\n"
 
               + "RENDIMIENTO\n"
-              + "La GPU del contenedor corre por software (llvmpipe). El rendimiento "
-              + "no es representativo del hardware real.";
+              + "El rendimiento puede no estar asegurado. Las herramientas que se "
+              + "usan (Scutum, Spatha, Sesar) estan en estado experimental y en "
+              + "desarrollo activo. Los FPS y la fluidez dependen del dispositivo, "
+              + "la pista y los shaders del juego.\n\n"
+
+              + "COMPONENTES EXPERIMENTALES\n"
+              + "Scutum (GLES), Spatha (Vulkan) y Sesar (escritorio) son proyectos "
+              + "en desarrollo continuo. Bugs visuales, cuelgues y comportamientos "
+              + "inesperados son esperables. No hay garantia de que las aplicaciones "
+              + "corran sin problemas.";
 
         android.widget.ScrollView sv = new android.widget.ScrollView(this);
         sv.setVerticalScrollBarEnabled(true);

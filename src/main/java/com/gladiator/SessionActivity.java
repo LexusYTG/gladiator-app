@@ -5,7 +5,11 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.net.ConnectivityManager;
+import android.net.NetworkCapabilities;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.IBinder;
 import android.os.ParcelFileDescriptor;
 import android.view.MotionEvent;
@@ -32,6 +36,9 @@ public class SessionActivity extends Activity {
 
     private volatile boolean volUpHeld = false;
     private volatile boolean volDownHeld = false;
+    private android.widget.TextView netIndicator;
+    private Handler netHandler;
+    private Runnable netRunnable;
 
     private final BroadcastReceiver startReceiver = new BroadcastReceiver() {
         @Override
@@ -117,6 +124,20 @@ public class SessionActivity extends Activity {
         klp.gravity = android.view.Gravity.BOTTOM;
         rootView.addView(keyboard, klp);
 
+        netIndicator = new android.widget.TextView(this);
+        netIndicator.setTextSize(9f);
+        netIndicator.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD);
+        netIndicator.setLetterSpacing(0.15f);
+        netIndicator.setPadding(20, 8, 20, 8);
+        netIndicator.setBackgroundColor(0xCC04060D);
+        FrameLayout.LayoutParams nlp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        nlp.gravity = android.view.Gravity.TOP | android.view.Gravity.END;
+        nlp.topMargin = 8;
+        nlp.rightMargin = 8;
+        netIndicator.setLayoutParams(nlp);
+        rootView.addView(netIndicator);
+
         fab = new FloatingButton(this);
         fab.setInitialFraction(0.5f, 0.06f);
         fab.setListener(this::showFloatingMenu);
@@ -135,7 +156,47 @@ public class SessionActivity extends Activity {
             registerReceiver(startReceiver, filter);
         }
 
+        startNetMonitor();
+
         new Thread(this::boot, "session-boot").start();
+    }
+
+    private void startNetMonitor() {
+        netHandler = new Handler(Looper.getMainLooper());
+        netRunnable = new Runnable() {
+            @Override public void run() {
+                updateNetIndicator();
+                if (netHandler != null && netRunnable != null)
+                    netHandler.postDelayed(netRunnable, 3000);
+            }
+        };
+        netHandler.post(netRunnable);
+    }
+
+    private void updateNetIndicator() {
+        if (netIndicator == null) return;
+        boolean online = false;
+        try {
+            ConnectivityManager cm = (ConnectivityManager)
+                    getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm != null) {
+                android.net.Network n = cm.getActiveNetwork();
+                if (n != null) {
+                    NetworkCapabilities caps = cm.getNetworkCapabilities(n);
+                    if (caps != null) {
+                        online = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                              && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+        netIndicator.setText(online ? "INTERNET // ON" : "INTERNET // OFF");
+        netIndicator.setTextColor(online ? 0xFF00E5FF : 0xFFFF3B5C);
+    }
+
+    private void stopNetMonitor() {
+        if (netHandler != null && netRunnable != null)
+            netHandler.removeCallbacks(netRunnable);
     }
 
     @Override
@@ -156,6 +217,7 @@ public class SessionActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        stopNetMonitor();
         try { unregisterReceiver(startReceiver); } catch (Exception ignored) {}
         try { stopService(new Intent(this, XServerService.class)); } catch (Throwable ignored) {}
         super.onDestroy();
@@ -325,6 +387,7 @@ public class SessionActivity extends Activity {
 
     private void onSessionDone() {
         GladiatorLog.log("Session", "DONE -> ocultando pantalla de carga");
+        if (bootPanel != null) bootPanel.stopElapsedTimer();
         runOnUiThread(() -> {
             bootPanel.animate().alpha(0f).setDuration(350).withEndAction(() -> {
                 bootPanel.setVisibility(View.GONE);

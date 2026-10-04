@@ -20,6 +20,8 @@ import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.text.InputType;
 import android.text.TextUtils;
@@ -728,12 +730,16 @@ public final class Ui {
     public static class BootPanel extends FrameLayout {
         private final TextView status, percent;
         private final HudBar bar;
+        private final TextView elapsed;
         private final TextView[] history = new TextView[3];
         private final NeonButton action;
         private final GlyphView logo;
         private String last;
         private ValueAnimator pulse;
         private boolean failed;
+        private Handler timerHandler;
+        private long startTime;
+        private Runnable timerRunnable;
 
         public BootPanel(Context c, String chipText) {
             super(c);
@@ -795,7 +801,15 @@ public final class Ui {
             bar = new HudBar(c);
             card.addView(bar, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, dp(c, 14)));
-            card.addView(vspace(c, 14));
+            card.addView(vspace(c, 10));
+
+            elapsed = label(c, "00:00", 12, MUTED, true, 0.12f);
+            elapsed.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            elp.topMargin = dp(c, 2);
+            card.addView(elapsed, elp);
+            card.addView(vspace(c, 10));
 
             float[] alphas = {0.30f, 0.48f, 0.68f};
             for (int i = 0; i < history.length; i++) {
@@ -860,10 +874,39 @@ public final class Ui {
                 logo.setScaleY(0.96f + 0.06f * v);
             });
             pulse.start();
+            startElapsedTimer();
+        }
+
+        private void startElapsedTimer() {
+            startTime = SystemClock.uptimeMillis();
+            if (timerHandler == null) timerHandler = new Handler(Looper.getMainLooper());
+            timerRunnable = new Runnable() {
+                @Override public void run() {
+                    long secs = (SystemClock.uptimeMillis() - startTime) / 1000;
+                    long mm = secs / 60, ss = secs % 60;
+                    if (elapsed != null) {
+                        elapsed.setText(String.format(Locale.US, "%02d:%02d", mm, ss));
+                        int col;
+                        if (secs < 300) col = GREEN;
+                        else if (secs < 600) col = AMBER;
+                        else col = RED;
+                        elapsed.setTextColor(col);
+                    }
+                    if (timerHandler != null && timerRunnable != null)
+                        timerHandler.postDelayed(timerRunnable, 1000);
+                }
+            };
+            timerHandler.post(timerRunnable);
+        }
+
+        public void stopElapsedTimer() {
+            if (timerHandler != null && timerRunnable != null)
+                timerHandler.removeCallbacks(timerRunnable);
         }
 
         @Override protected void onDetachedFromWindow() {
             if (pulse != null) pulse.cancel();
+            stopElapsedTimer();
             super.onDetachedFromWindow();
         }
     }
