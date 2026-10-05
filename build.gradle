@@ -91,7 +91,7 @@ configurations.all {
 // Solo corre si algún archivo en bootstrap/ cambió (Gradle caching).
 // ============================================================
 tasks.register('zipBootstrap') {
-    def bootstrapDir = rootProject.file('bootstrap')
+    def bootstrapDir = rootProject.file('boot/gladiator-bootstrap')
     def outZip = file("${projectDir}/src/main/assets/bootstrap-aarch64.zip")
     def assetsDir = file("${projectDir}/src/main/assets")
 
