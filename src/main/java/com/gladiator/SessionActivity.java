@@ -97,6 +97,16 @@ public class SessionActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         lorieView = new LorieView(this, null);
+        // Activar el bridge de clipboard X11 <-> Android. LorieView expone el
+        // metodo pero LorieApp/MainActivity nunca lo llama desde SessionActivity,
+        // asi que clipboardSyncEnabled queda en false y el X server nunca pide
+        // ni entrega selecciones. Ver LorieView.reloadPreferences().
+        try {
+            com.termux.x11.LorieApp app = (com.termux.x11.LorieApp) getApplicationContext();
+            lorieView.reloadPreferences(app.builtInPrefs);
+        } catch (Throwable t) {
+            GladiatorLog.log("Session", "reloadPreferences fallo: " + t.getMessage());
+        }
         lorieView.setVisibility(View.GONE);
         lorieView.setFocusable(true);
         lorieView.setFocusableInTouchMode(true);
