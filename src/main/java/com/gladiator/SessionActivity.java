@@ -105,12 +105,12 @@ public class SessionActivity extends Activity {
         rootView.addView(lorieView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        overlay = new GamepadOverlay(this, lorieView);
+        overlay = new GamepadOverlay(this, lorieView, rootView);
         List<ControlConfig> controls = ControlConfigStore.load(this, cname);
         overlay.load(controls);
-        overlay.setVisibility(View.GONE);
-        rootView.addView(overlay, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        overlay.setVisible(false);
+        rootView.addOnLayoutChangeListener((vv, ll, tt, rr, bb, o1, o2, o3, o4) ->
+                overlay.relayout(rr - ll, bb - tt));
 
         keyboard = new CustomKeyboard(this, lorieView);
         keyboard.setVisibility(View.GONE);
@@ -137,6 +137,8 @@ public class SessionActivity extends Activity {
             registerReceiver(startReceiver, filter);
         }
 
+        AudioSinkService.start(this);
+
         new Thread(this::boot, "session-boot").start();
     }
 
@@ -158,6 +160,7 @@ public class SessionActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        AudioSinkService.stop(this);
         try { unregisterReceiver(startReceiver); } catch (Exception ignored) {}
         try { stopService(new Intent(this, XServerService.class)); } catch (Throwable ignored) {}
         super.onDestroy();
@@ -288,13 +291,13 @@ public class SessionActivity extends Activity {
     }
 
     private void showFloatingMenu() {
-        final boolean controlsVisible = overlay != null && overlay.getVisibility() == View.VISIBLE;
+        final boolean controlsVisible = overlay != null && overlay.isVisible();
         final boolean keyboardVisible = keyboard != null && keyboard.getVisibility() == View.VISIBLE;
         new Ui.GameDialog(this, "Opciones", Ui.CYAN)
                 .button(controlsVisible ? "Ocultar controles" : "Mostrar controles",
                         Ui.NeonButton.PRIMARY,
                         d -> { d.dismiss(); if (overlay != null)
-                                overlay.setVisibility(controlsVisible ? View.GONE : View.VISIBLE); })
+                                overlay.setVisible(!controlsVisible); })
                 .button(keyboardVisible ? "Ocultar teclado" : "Mostrar teclado",
                         Ui.NeonButton.SECONDARY,
                         d -> { d.dismiss(); if (keyboard != null)
@@ -349,7 +352,7 @@ public class SessionActivity extends Activity {
             bootPanel.animate().alpha(0f).setDuration(350).withEndAction(() -> {
                 bootPanel.setVisibility(View.GONE);
                 bgView.setVisibility(View.GONE);
-                overlay.setVisibility(View.VISIBLE);
+                overlay.setVisible(true);
                 fab.setVisibility(View.VISIBLE);
                 lorieView.requestFocus();
             }).start();

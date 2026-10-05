@@ -13,54 +13,73 @@ import android.widget.FrameLayout;
 
 import com.termux.x11.LorieView;
 
+import java.util.ArrayList;
 import java.util.List;
 
-public class GamepadOverlay extends FrameLayout {
+/**
+ * Manager de controles en pantalla.
+ *
+ * NO es un View: agrega cada ControlView como hijo directo del rootView, al
+ * mismo nivel que el LorieView. Asi Android hace hit-test por region y con
+ * splitMotionEvents (default) reparte dedos entre hermanos: dedo 1 en un
+ * ControlView, dedo 2 en el LorieView, sin que uno robe al otro.
+ *
+ * Con el diseno anterior (overlay MATCH_PARENT encima del LorieView), el
+ * gesture completo se asignaba al overlay desde el primer DOWN y los dedos
+ * siguientes iban al mismo target aunque estuvieran fuera de los botones.
+ */
+public class GamepadOverlay {
+    private final Context ctx;
     private final LorieView target;
+    private final ViewGroup parent;
+    private final List<ControlView> views = new ArrayList<>();
+    private boolean visible = false;
 
-    public GamepadOverlay(Context c, LorieView target) {
-        super(c);
+    public GamepadOverlay(Context c, LorieView target, ViewGroup parent) {
+        this.ctx = c;
         this.target = target;
-        setClipChildren(false);
-        setClipToPadding(false);
-        setClickable(false);
-        setFocusable(false);
+        this.parent = parent;
     }
 
     public void load(List<ControlConfig> controls) {
-        removeAllViews();
+        for (ControlView v : views) parent.removeView(v);
+        views.clear();
         for (ControlConfig c : controls) {
-            ControlView v = new ControlView(getContext(), c, target);
-            addView(v, new LayoutParams(0, 0));
+            ControlView v = new ControlView(ctx, c, target);
+            views.add(v);
+            parent.addView(v);
         }
-        requestLayout();
+        applyVisibility();
     }
 
-    @Override
-    protected void onMeasure(int ws, int hs) {
-        int w = MeasureSpec.getSize(ws);
-        int h = MeasureSpec.getSize(hs);
-        setMeasuredDimension(w, h);
+    public void setVisible(boolean v) {
+        visible = v;
+        applyVisibility();
+    }
+
+    public boolean isVisible() { return visible; }
+
+    /** Reposiciona los controles cuando cambia el tamano del parent. */
+    public void relayout(int w, int h) {
         int minDim = Math.min(w, h);
-        for (int i = 0; i < getChildCount(); i++) {
-            ControlView v = (ControlView) getChildAt(i);
+        for (ControlView v : views) {
             int size = (int)(v.cfg.sizeFrac * minDim);
-            v.measure(MeasureSpec.makeMeasureSpec(size, MeasureSpec.EXACTLY),
-                    MeasureSpec.makeMeasureSpec(size, MeasureSpec.EXACTLY));
+            int cx = (int)(v.cfg.cx * w);
+            int cy = (int)(v.cfg.cy * h);
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(size, size);
+            lp.leftMargin = cx - size / 2;
+            lp.topMargin = cy - size / 2;
+            lp.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
+            v.setLayoutParams(lp);
         }
     }
 
-    @Override
-    protected void onLayout(boolean changed, int l, int t, int r, int b) {
-        int w = r - l, h = b - t;
-        for (int i = 0; i < getChildCount(); i++) {
-            ControlView c = (ControlView) getChildAt(i);
-            int size = c.getMeasuredWidth();
-            int cx = (int)(c.cfg.cx * w);
-            int cy = (int)(c.cfg.cy * h);
-            c.layout(cx - size/2, cy - size/2, cx + size/2, cy + size/2);
-        }
+    private void applyVisibility() {
+        for (ControlView v : views)
+            v.setVisibility(visible ? View.VISIBLE : View.GONE);
     }
+
+    // ============================================================ ControlView
 
     private static class ControlView extends View {
         final ControlConfig cfg;
@@ -223,8 +242,19 @@ public class GamepadOverlay extends FrameLayout {
         private boolean handleDpad(MotionEvent e) {
             int action = e.getActionMasked();
             switch (action) {
-                case MotionEvent.ACTION_DOWN:
+                case MotionEvent.ACTION_DOWN: {
+                    int idx = e.getActionIndex();
+                    int bit = dpadBitAt(e.getX(idx), e.getY(idx), getWidth(), getHeight());
+                    if (bit != 0) {
+                        dpadActive |= bit;
+                        pressDpadBit(bit, true);
+                        dpadPointerId = e.getPointerId(idx);
+                        invalidate();
+                    }
+                    return true;
+                }
                 case MotionEvent.ACTION_POINTER_DOWN: {
+                    if (dpadPointerId >= 0) return true;
                     int idx = e.getActionIndex();
                     int bit = dpadBitAt(e.getX(idx), e.getY(idx), getWidth(), getHeight());
                     if (bit != 0) {
@@ -250,8 +280,15 @@ public class GamepadOverlay extends FrameLayout {
                     }
                     return true;
                 }
+                case MotionEvent.ACTION_POINTER_UP: {
+                    int idx = e.getActionIndex();
+                    if (e.getPointerId(idx) != dpadPointerId) return true;
+                    releaseAllDpadBits();
+                    dpadPointerId = -1;
+                    invalidate();
+                    return true;
+                }
                 case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_POINTER_UP:
                 case MotionEvent.ACTION_CANCEL: {
                     releaseAllDpadBits();
                     dpadPointerId = -1;
@@ -293,8 +330,14 @@ public class GamepadOverlay extends FrameLayout {
             int action = e.getActionMasked();
             float cx = getWidth() / 2f, cy = getHeight() / 2f;
             switch (action) {
-                case MotionEvent.ACTION_DOWN:
+                case MotionEvent.ACTION_DOWN: {
+                    int idx = e.getActionIndex();
+                    stickPointerId = e.getPointerId(idx);
+                    updateStick(e.getX(idx), e.getY(idx), cx, cy);
+                    return true;
+                }
                 case MotionEvent.ACTION_POINTER_DOWN: {
+                    if (stickPointerId >= 0) return true;
                     int idx = e.getActionIndex();
                     stickPointerId = e.getPointerId(idx);
                     updateStick(e.getX(idx), e.getY(idx), cx, cy);
@@ -307,8 +350,16 @@ public class GamepadOverlay extends FrameLayout {
                     updateStick(e.getX(idx), e.getY(idx), cx, cy);
                     return true;
                 }
+                case MotionEvent.ACTION_POINTER_UP: {
+                    int idx = e.getActionIndex();
+                    if (e.getPointerId(idx) != stickPointerId) return true;
+                    stickPointerId = -1;
+                    stickX = 0; stickY = 0;
+                    releaseStickKeys();
+                    invalidate();
+                    return true;
+                }
                 case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_POINTER_UP:
                 case MotionEvent.ACTION_CANCEL: {
                     stickPointerId = -1;
                     stickX = 0; stickY = 0;

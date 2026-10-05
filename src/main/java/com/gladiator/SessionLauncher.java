@@ -45,7 +45,8 @@ public class SessionLauncher {
         pb.environment().put("HOME", home.getAbsolutePath());
         pb.environment().put("TMPDIR", tmp.getAbsolutePath());
         pb.environment().put("PROOT_TMP_DIR", tmp.getAbsolutePath());
-        pb.environment().put("PROOT_NO_SECCOMP", "1");
+        // PROOT_NO_SECCOMP desactivado: fuerza ptrace por syscall (143x mas lento).
+        // pb.environment().put("PROOT_NO_SECCOMP", "1");
         pb.environment().put("LD_LIBRARY_PATH", new File(prefix, "lib").getAbsolutePath());
         // Esto es lo que hace que Termux sea Termux: libtermux-exec.so traduce
         // /bin/bash, /usr/bin/env, etc a $PREFIX/bin/... via LD_PRELOAD.
