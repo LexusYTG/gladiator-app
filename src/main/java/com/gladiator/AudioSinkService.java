@@ -9,20 +9,22 @@ import android.content.Intent;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioTrack;
+import android.net.LocalSocket;
+import android.net.LocalSocketAddress;
 import android.os.IBinder;
 
 import java.io.File;
 import java.io.InputStream;
 
 /**
- * AudioSinkService - lado Java de Orator.
+ * AudioSinkService - lee PCM de PulseAudio y lo reproduce en Android.
  *
- * Arranca el binario bionic oratord como proceso hijo. oratord conecta al
- * socket AF_UNIX que expone PulseAudio en el container (via host-tmp) y
- * escribe PCM crudo s16le 2ch 44100Hz a su stdout. Este servicio lee ese
- * stdout como InputStream y lo escribe a un AudioTrack en STREAM mode.
+ * Java puro. Sin binario intermedio. Se conecta al socket AF_UNIX que
+ * expone module-simple-protocol-unix de PulseAudio (vive en host-tmp/,
+ * bindeado al container). Lee PCM crudo s16le 2ch 44100Hz y lo escribe
+ * a un AudioTrack en STREAM mode.
  *
- * Sin sockets Java, sin API 33, sin binder. Solo ProcessBuilder + pipe.
+ * Sin proceso intermedio: sin huérfanos, sin doble oratord, sin pipe.
  */
 public class AudioSinkService extends Service {
 
@@ -33,7 +35,7 @@ public class AudioSinkService extends Service {
 
     private Thread reader;
     private volatile boolean running;
-    private Process child;
+    private LocalSocket sock;
 
     public static void start(Context ctx) {
         Intent i = new Intent(ctx, AudioSinkService.class);
@@ -47,6 +49,7 @@ public class AudioSinkService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        android.util.Log.i(TAG, "onStartCommand entro, running=" + running);
         try {
             NotificationChannel ch = new NotificationChannel(
                     CHAN, "Gladiator Audio", NotificationManager.IMPORTANCE_LOW);
@@ -66,37 +69,28 @@ public class AudioSinkService extends Service {
         running = true;
 
         File prefix = BootstrapInstaller.prefixDir(this);
-        File bin      = new File(prefix, "bin/oratord");
-        File paSock   = new File(prefix, "tmp/host-tmp/orator-pa.sock");
-        File logFile  = new File(prefix, "var/log/oratord.log");
-        logFile.getParentFile().mkdirs();
+        File paSock = new File(prefix, "tmp/host-tmp/orator-pa.sock");
 
-        reader = new Thread(() -> loop(bin, paSock, logFile), "orator-reader");
+        reader = new Thread(() -> loop(paSock), "audio-sink");
         reader.setDaemon(true);
         reader.start();
         return START_STICKY;
     }
 
-    private void loop(File bin, File paSock, File logFile) {
+    private void loop(File paSock) {
         while (running) {
-            Process p = null;
             InputStream in = null;
             AudioTrack track = null;
 
             try {
-                if (!bin.exists()) {
-                    GladiatorLog.err(TAG, "no existe " + bin.getAbsolutePath(), null);
-                    sleep(2000);
-                    continue;
-                }
-                ProcessBuilder pb = new ProcessBuilder(
-                        bin.getAbsolutePath(), paSock.getAbsolutePath());
-                pb.environment().put("ORATOR_VERBOSE", "1");
-                pb.redirectErrorStream(false);
-                pb.redirectError(ProcessBuilder.Redirect.appendTo(logFile));
-                p = pb.start();
-                child = p;
-                in = p.getInputStream();
+                android.util.Log.i(TAG, "conectando a " + paSock.getAbsolutePath());
+                LocalSocket s = new LocalSocket();
+                s.connect(new LocalSocketAddress(
+                        paSock.getAbsolutePath(),
+                        LocalSocketAddress.Namespace.FILESYSTEM));
+                sock = s;
+                in = s.getInputStream();
+                android.util.Log.i(TAG, "conectado, getInputStream OK");
 
                 int bufSz = AudioTrack.getMinBufferSize(SAMPLE_RATE,
                         AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT);
@@ -117,6 +111,7 @@ public class AudioSinkService extends Service {
                         .setTransferMode(AudioTrack.MODE_STREAM)
                         .build();
                 track.play();
+                android.util.Log.i(TAG, "AudioTrack.play OK, bufSz=" + bufSz);
 
                 byte[] buf = new byte[8192];
                 while (running) {
@@ -130,6 +125,7 @@ public class AudioSinkService extends Service {
                     }
                 }
             } catch (Throwable t) {
+                android.util.Log.e(TAG, "loop exception", t);
                 GladiatorLog.log(TAG, "loop: " + t.getMessage());
             } finally {
                 if (track != null) {
@@ -137,10 +133,10 @@ public class AudioSinkService extends Service {
                     try { track.release(); } catch (Throwable ignored) {}
                 }
                 if (in != null) try { in.close(); } catch (Throwable ignored) {}
-                if (p != null) {
-                    try { p.destroy(); } catch (Throwable ignored) {}
+                if (sock != null) {
+                    try { sock.close(); } catch (Throwable ignored) {}
+                    sock = null;
                 }
-                child = null;
             }
 
             if (running) sleep(1000);
@@ -158,7 +154,7 @@ public class AudioSinkService extends Service {
             reader.interrupt();
             try { reader.join(1500); } catch (InterruptedException ignored) {}
         }
-        if (child != null) { try { child.destroy(); } catch (Throwable ignored) {} }
+        if (sock != null) { try { sock.close(); } catch (Throwable ignored) {} }
         super.onDestroy();
     }
 
