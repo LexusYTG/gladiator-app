@@ -103,7 +103,8 @@ public class SettingsActivity extends Activity {
 
         LinearLayout inputCard = section(list, "Modo de mouse");
         inputCard.addView(Ui.bodyText(this,
-                "Botones volumen: subir = click izq, bajar = click der. " +
+                "Botones volumen: subir = click izq, bajar = click der. Los gestos se desactivan " +
+                "(el tactil solo mueve la camara) y puedes poner una rueda de scroll flotante. " +
                 "Gestos: 1 dedo tap = click izq, 2 dedos tap = click der, 2 dedos drag = scroll.",
                 11, Ui.MUTED));
         inputCard.addView(Ui.vspace(this, 10));

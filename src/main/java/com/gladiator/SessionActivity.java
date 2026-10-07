@@ -28,7 +28,7 @@ public class SessionActivity extends Activity {
     private CustomKeyboard keyboard;
     private Container container;
     private int xw = 1280, xh = 720;
-    private int inputMode = 0;  // 0=botones volumen, 1=gestos
+    private volatile int inputMode = 0;  // 0=botones volumen, 1=gestos
     private volatile boolean xserverConnected = false;
 
     private volatile boolean volUpHeld = false;
@@ -116,6 +116,7 @@ public class SessionActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         overlay = new GamepadOverlay(this, lorieView, rootView);
+        overlay.setInputMode(inputMode);
         List<ControlConfig> controls = ControlConfigStore.load(this, cname);
         overlay.load(controls);
         overlay.setVisible(false);
@@ -163,6 +164,13 @@ public class SessionActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        inputMode = new Prefs(this).inputMode();
+        if (overlay != null) overlay.setInputMode(inputMode);
+    }
+
+    @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) Ui.styleWindow(this);
@@ -189,6 +197,41 @@ public class SessionActivity extends Activity {
             boolean multiMoved = false;
             float multiDownX, multiDownY;
             boolean cursorInited = false;
+            // modo botones: un solo dedo mueve la camara, nada mas
+            int camId = -1;
+            float camX, camY;
+
+            private boolean cameraOnly(MotionEvent e) {
+                switch (e.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                    case MotionEvent.ACTION_POINTER_DOWN: {
+                        if (camId < 0) {
+                            int i = e.getActionIndex();
+                            camId = e.getPointerId(i);
+                            camX = e.getX(i);
+                            camY = e.getY(i);
+                        }
+                        return true;
+                    }
+                    case MotionEvent.ACTION_MOVE: {
+                        if (camId < 0) return true;
+                        int i = e.findPointerIndex(camId);
+                        if (i < 0) return true;
+                        float x = e.getX(i), y = e.getY(i);
+                        v.sendMouseEvent((x - camX) * SENS, (y - camY) * SENS, 0, false, true);
+                        camX = x; camY = y;
+                        return true;
+                    }
+                    case MotionEvent.ACTION_POINTER_UP:
+                        if (e.getPointerId(e.getActionIndex()) == camId) camId = -1;
+                        return true;
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        camId = -1;
+                        return true;
+                }
+                return true;
+            }
 
             @Override public boolean onTouch(View view, MotionEvent e) {
                 int n = e.getPointerCount();
@@ -198,6 +241,10 @@ public class SessionActivity extends Activity {
                     v.sendMouseEvent(xw / 2f, xh / 2f, 0, false, false);
                     cursorInited = true;
                 }
+
+                // Modo botones de volumen: gestos desactivados por completo
+                // (sin tap=click, sin 2 dedos=scroll/click der). Solo camara.
+                if (inputMode == 0) return cameraOnly(e);
 
                 if (n >= 2 || multiTouch) {
                     if (action == MotionEvent.ACTION_POINTER_DOWN) {

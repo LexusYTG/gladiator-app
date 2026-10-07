@@ -34,6 +34,7 @@ public class GamepadOverlay {
     private final ViewGroup parent;
     private final List<ControlView> views = new ArrayList<>();
     private boolean visible = false;
+    private int inputMode = 0;   // 0=botones volumen, 1=gestos
 
     public GamepadOverlay(Context c, LorieView target, ViewGroup parent) {
         this.ctx = c;
@@ -59,15 +60,26 @@ public class GamepadOverlay {
 
     public boolean isVisible() { return visible; }
 
+    /** El control de scroll solo existe en modo botones de volumen (0). */
+    public void setInputMode(int mode) {
+        inputMode = mode;
+        applyVisibility();
+    }
+
+    private boolean activeInMode(ControlConfig c) {
+        return c.type != ControlConfig.TYPE_SCROLL || inputMode == 0;
+    }
+
     /** Reposiciona los controles cuando cambia el tamano del parent. */
     public void relayout(int w, int h) {
         int minDim = Math.min(w, h);
         for (ControlView v : views) {
             int size = (int)(v.cfg.sizeFrac * minDim);
+            int width = Math.max(1, (int)(size * v.cfg.aspect()));
             int cx = (int)(v.cfg.cx * w);
             int cy = (int)(v.cfg.cy * h);
-            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(size, size);
-            lp.leftMargin = cx - size / 2;
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(width, size);
+            lp.leftMargin = cx - width / 2;
             lp.topMargin = cy - size / 2;
             lp.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
             v.setLayoutParams(lp);
@@ -75,8 +87,11 @@ public class GamepadOverlay {
     }
 
     private void applyVisibility() {
-        for (ControlView v : views)
-            v.setVisibility(visible ? View.VISIBLE : View.GONE);
+        for (ControlView v : views) {
+            boolean show = visible && activeInMode(v.cfg);
+            v.setVisibility(show ? View.VISIBLE : View.GONE);
+            if (!show) v.releaseAll();   // evita click izq. "pegado" al ocultar
+        }
     }
 
     // ============================================================ ControlView
@@ -97,6 +112,13 @@ public class GamepadOverlay {
         int stickPointerId = -1;
         float stickX = 0f, stickY = 0f;
         int stickActiveKeys = 0;
+
+        // TYPE_FIRE
+        int firePointerId = -1;
+        float fireLastX, fireLastY;
+        // TYPE_SCROLL
+        int scrollPointerId = -1;
+        float scrollLastY, scrollAcc, scrollKnob, scrollPhase;
 
         ControlView(Context c, ControlConfig cfg, LorieView target) {
             super(c);
@@ -123,6 +145,13 @@ public class GamepadOverlay {
                 case ControlConfig.TYPE_BUTTON: drawButton(cv, w, h, pad); break;
                 case ControlConfig.TYPE_DPAD:   drawDpad(cv, w, h, pad); break;
                 case ControlConfig.TYPE_JOYSTICK: drawJoystick(cv, w, h, pad); break;
+                case ControlConfig.TYPE_FIRE:
+                    ControlShapes.drawBullet(cv, rect, path, fill, stroke, accent, held);
+                    break;
+                case ControlConfig.TYPE_SCROLL:
+                    ControlShapes.drawScroll(cv, rect, path, fill, stroke, accent,
+                            scrollKnob, scrollPhase, scrollPointerId >= 0);
+                    break;
             }
         }
 
@@ -210,8 +239,138 @@ public class GamepadOverlay {
                 case ControlConfig.TYPE_BUTTON: return handleButton(e);
                 case ControlConfig.TYPE_DPAD:   return handleDpad(e);
                 case ControlConfig.TYPE_JOYSTICK: return handleJoystick(e);
+                case ControlConfig.TYPE_FIRE:   return handleFire(e);
+                case ControlConfig.TYPE_SCROLL: return handleScroll(e);
             }
             return false;
+        }
+
+        // ------------------------------------------------------------ fire
+        // Mantener apretado = click izquierdo sostenido. Arrastrar el dedo
+        // mueve el mouse (como la camara tactil) con cfg.sens.
+
+        private boolean handleFire(MotionEvent e) {
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN: {
+                    int idx = e.getActionIndex();
+                    firePointerId = e.getPointerId(idx);
+                    fireLastX = e.getX(idx);
+                    fireLastY = e.getY(idx);
+                    if (!held) {
+                        held = true;
+                        if (target != null) target.sendMouseEvent(0f, 0f, 1, true, true);
+                        invalidate();
+                    }
+                    return true;
+                }
+                case MotionEvent.ACTION_MOVE: {
+                    if (firePointerId < 0) return true;
+                    int idx = e.findPointerIndex(firePointerId);
+                    if (idx < 0) return true;
+                    float x = e.getX(idx), y = e.getY(idx);
+                    float dx = x - fireLastX, dy = y - fireLastY;
+                    fireLastX = x; fireLastY = y;
+                    if ((dx != 0f || dy != 0f) && target != null)
+                        target.sendMouseEvent(dx * cfg.sens, dy * cfg.sens, 0, false, true);
+                    return true;
+                }
+                case MotionEvent.ACTION_POINTER_UP: {
+                    if (e.getPointerId(e.getActionIndex()) != firePointerId) return true;
+                    releaseFire();
+                    return true;
+                }
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    releaseFire();
+                    return true;
+            }
+            return true;
+        }
+
+        private void releaseFire() {
+            firePointerId = -1;
+            if (held) {
+                held = false;
+                if (target != null) target.sendMouseEvent(0f, 0f, 1, false, true);
+                invalidate();
+            }
+        }
+
+        // ---------------------------------------------------------- scroll
+        // Deslizar la bolita: cada SCROLL_STEP_FRAC de alto recorrido = 1 notch.
+        // Arriba = rueda hacia arriba. Al soltar vuelve al centro.
+
+        private static final float SCROLL_STEP_FRAC = 0.12f;
+        // Signo de sendMouseWheelEvent para "rueda hacia arriba". Si en tu build
+        // sale invertido, cambia solo esta constante.
+        private static final int WHEEL_UP = -120;
+
+        private boolean handleScroll(MotionEvent e) {
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN: {
+                    int idx = e.getActionIndex();
+                    scrollPointerId = e.getPointerId(idx);
+                    scrollLastY = e.getY(idx);
+                    scrollAcc = 0f;
+                    scrollKnob = knobFor(e.getY(idx));
+                    invalidate();
+                    return true;
+                }
+                case MotionEvent.ACTION_MOVE: {
+                    if (scrollPointerId < 0) return true;
+                    int idx = e.findPointerIndex(scrollPointerId);
+                    if (idx < 0) return true;
+                    float y = e.getY(idx);
+                    float dy = y - scrollLastY;
+                    scrollLastY = y;
+                    scrollAcc += dy;
+                    scrollPhase += dy;
+                    scrollKnob = knobFor(y);
+                    float step = Math.max(8f, getHeight() * SCROLL_STEP_FRAC);
+                    while (Math.abs(scrollAcc) >= step) {
+                        boolean up = scrollAcc < 0;
+                        int sign = up ? WHEEL_UP : -WHEEL_UP;
+                        if (target != null) target.sendMouseWheelEvent(0, sign);
+                        scrollAcc += up ? step : -step;
+                    }
+                    invalidate();
+                    return true;
+                }
+                case MotionEvent.ACTION_POINTER_UP: {
+                    if (e.getPointerId(e.getActionIndex()) != scrollPointerId) return true;
+                    releaseScroll();
+                    return true;
+                }
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    releaseScroll();
+                    return true;
+            }
+            return true;
+        }
+
+        private float knobFor(float y) {
+            float t = ControlShapes.scrollTravel(getWidth(), getHeight());
+            return Math.max(-t, Math.min(t, y - getHeight() / 2f));
+        }
+
+        private void releaseScroll() {
+            scrollPointerId = -1;
+            scrollAcc = 0f;
+            scrollKnob = 0f;
+            invalidate();
+        }
+
+        /** Suelta todo lo que este sostenido (al ocultar el control / salir de pantalla). */
+        void releaseAll() {
+            if (cfg.type == ControlConfig.TYPE_FIRE) releaseFire();
+            else if (cfg.type == ControlConfig.TYPE_SCROLL) releaseScroll();
+        }
+
+        @Override
+        protected void onDetachedFromWindow() {
+            releaseAll();
+            super.onDetachedFromWindow();
         }
 
         private boolean handleButton(MotionEvent e) {

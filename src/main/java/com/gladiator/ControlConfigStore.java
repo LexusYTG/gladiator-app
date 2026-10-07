@@ -35,6 +35,7 @@ public class ControlConfigStore {
                 c.keyDown = o.optInt("keyDown");
                 c.keyLeft = o.optInt("keyLeft");
                 c.keyRight = o.optInt("keyRight");
+                c.sens = (float) o.optDouble("sens", ControlConfig.DEFAULT_SENS);
                 out.add(c);
             }
         } catch (Exception ignored2) {}
@@ -59,6 +60,7 @@ public class ControlConfigStore {
                 o.put("keyDown", c.keyDown);
                 o.put("keyLeft", c.keyLeft);
                 o.put("keyRight", c.keyRight);
+                o.put("sens", c.sens);
                 arr.put(o);
             }
             sp.edit().putString(KEY, arr.toString()).apply();

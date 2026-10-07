@@ -29,6 +29,7 @@ public class ControlEditorActivity extends Activity {
     private String containerName;
     private List<ControlConfig> controls;
     private EditorCanvas canvas;
+    private int inputMode = 0;   // 0=botones volumen, 1=gestos
 
     @Override
     protected void onCreate(Bundle b) {
@@ -39,6 +40,7 @@ public class ControlEditorActivity extends Activity {
         containerName = getSharedPreferences("gladiator", MODE_PRIVATE)
                 .getString("last_container", "default");
         controls = ControlConfigStore.load(this, containerName);
+        inputMode = new Prefs(this).inputMode();
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(0xFF0A0E1A);
@@ -90,6 +92,17 @@ public class ControlEditorActivity extends Activity {
         addStick.setOnClickListener(v -> addControl(ControlConfig.TYPE_JOYSTICK));
         dock.addView(addStick, weightLp());
 
+        Ui.NeonButton addFire = new Ui.NeonButton(this, "+ Disparo", Ui.NeonButton.SECONDARY);
+        addFire.setOnClickListener(v -> addControl(ControlConfig.TYPE_FIRE));
+        dock.addView(addFire, weightLp());
+
+        // La rueda de scroll solo existe en modo "Botones volumen".
+        if (inputMode == 0) {
+            Ui.NeonButton addScroll = new Ui.NeonButton(this, "+ Scroll", Ui.NeonButton.SECONDARY);
+            addScroll.setOnClickListener(v -> addControl(ControlConfig.TYPE_SCROLL));
+            dock.addView(addScroll, weightLp());
+        }
+
         Ui.NeonButton saveBtn = new Ui.NeonButton(this, "Guardar", Ui.NeonButton.PRIMARY);
         saveBtn.setOnClickListener(v -> saveAndExit());
         dock.addView(saveBtn, weightLp());
@@ -101,6 +114,18 @@ public class ControlEditorActivity extends Activity {
 
         setContentView(root);
         canvas.invalidate();
+    }
+
+    /** Un control de scroll guardado no se muestra ni se edita en modo gestos (se conserva en disco). */
+    private boolean editable(ControlConfig c) {
+        return c.type != ControlConfig.TYPE_SCROLL || inputMode == 0;
+    }
+
+    private String nameOf(ControlConfig c) {
+        if (c.label != null && !c.label.isEmpty()) return c.label;
+        if (c.type == ControlConfig.TYPE_FIRE) return "Disparo";
+        if (c.type == ControlConfig.TYPE_SCROLL) return "Scroll";
+        return "control";
     }
 
     private LinearLayout.LayoutParams weightLp() {
@@ -137,6 +162,13 @@ public class ControlEditorActivity extends Activity {
         if (type == ControlConfig.TYPE_BUTTON) {
             c.label = "A";
             c.keyCode = android.view.KeyEvent.KEYCODE_A;
+        } else if (type == ControlConfig.TYPE_FIRE) {
+            c.label = "";
+            c.sizeFrac = 0.22f;
+            c.sens = ControlConfig.DEFAULT_SENS;
+        } else if (type == ControlConfig.TYPE_SCROLL) {
+            c.label = "";
+            c.sizeFrac = 0.24f;
         } else {
             c.label = "STICK";
             c.keyUp = android.view.KeyEvent.KEYCODE_W;
@@ -156,10 +188,15 @@ public class ControlEditorActivity extends Activity {
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
 
-        body.addView(Ui.label(this, "ETIQUETA", 10, Ui.MUTED, true, 0.2f));
-        body.addView(Ui.vspace(this, 6));
-        body.addView(labelInput);
-        body.addView(Ui.vspace(this, 14));
+        final boolean keyed = c.type == ControlConfig.TYPE_BUTTON
+                || c.type == ControlConfig.TYPE_DPAD
+                || c.type == ControlConfig.TYPE_JOYSTICK;
+        if (keyed) {
+            body.addView(Ui.label(this, "ETIQUETA", 10, Ui.MUTED, true, 0.2f));
+            body.addView(Ui.vspace(this, 6));
+            body.addView(labelInput);
+            body.addView(Ui.vspace(this, 14));
+        }
 
         Spinner shapeSpin = null;
         if (c.type == ControlConfig.TYPE_BUTTON) {
@@ -187,6 +224,25 @@ public class ControlEditorActivity extends Activity {
         body.addView(sizeSpin);
         body.addView(Ui.vspace(this, 14));
 
+        final float[] SENS_VALS = {0.5f, 0.75f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 4.0f};
+        final String[] SENS_LABELS = {"0.5×", "0.75×", "1×", "1.5× (cámara)", "2×", "2.5×", "3×", "4×"};
+        Spinner sensTmp = null;
+        if (c.type == ControlConfig.TYPE_FIRE) {
+            int sensIdx = 3;
+            float bestS = 999f;
+            for (int i = 0; i < SENS_VALS.length; i++) {
+                float d = Math.abs(SENS_VALS[i] - c.sens);
+                if (d < bestS) { bestS = d; sensIdx = i; }
+            }
+            body.addView(Ui.label(this, "SENSIBILIDAD", 10, Ui.MUTED, true, 0.2f));
+            body.addView(Ui.vspace(this, 6));
+            sensTmp = makeSpinner(SENS_LABELS);
+            sensTmp.setSelection(sensIdx);
+            body.addView(sensTmp);
+            body.addView(Ui.vspace(this, 14));
+        }
+        final Spinner sensSpin = sensTmp;
+
         final List<Spinner> keySpinners = new ArrayList<>();
         final List<String> keyLabels = KeyMap.labels();
         String[] keyArr = keyLabels.toArray(new String[0]);
@@ -199,7 +255,7 @@ public class ControlEditorActivity extends Activity {
             if (idx >= 0) ks.setSelection(idx);
             body.addView(ks);
             keySpinners.add(ks);
-        } else {
+        } else if (c.type == ControlConfig.TYPE_DPAD || c.type == ControlConfig.TYPE_JOYSTICK) {
             String[][] dirs = {
                     {"ARRIBA", KeyMap.labelFor(c.keyUp)},
                     {"ABAJO", KeyMap.labelFor(c.keyDown)},
@@ -227,12 +283,13 @@ public class ControlEditorActivity extends Activity {
                     canvas.invalidate();
                 })
                 .button("Guardar", Ui.NeonButton.PRIMARY, d -> {
-                    c.label = labelInput.getText().toString();
+                    if (keyed) c.label = labelInput.getText().toString();
                     if (finalShapeSpin != null) c.shape = finalShapeSpin.getSelectedItemPosition();
                     c.sizeFrac = SIZES_FRAC[sizeSpin.getSelectedItemPosition()];
+                    if (sensSpin != null) c.sens = SENS_VALS[sensSpin.getSelectedItemPosition()];
                     if (c.type == ControlConfig.TYPE_BUTTON) {
                         c.keyCode = KeyMap.codeFor((String) keySpinners.get(0).getSelectedItem());
-                    } else {
+                    } else if (keyed) {
                         c.keyUp    = KeyMap.codeFor((String) keySpinners.get(0).getSelectedItem());
                         c.keyDown  = KeyMap.codeFor((String) keySpinners.get(1).getSelectedItem());
                         c.keyLeft  = KeyMap.codeFor((String) keySpinners.get(2).getSelectedItem());
@@ -262,6 +319,7 @@ public class ControlEditorActivity extends Activity {
         final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
         final Paint handleFill = new Paint(Paint.ANTI_ALIAS_FLAG);
         final Paint handleStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+        final Paint accent = new Paint(Paint.ANTI_ALIAS_FLAG);
         final Path path = new Path();
         final RectF rect = new RectF();
 
@@ -285,6 +343,7 @@ public class ControlEditorActivity extends Activity {
             strokeThin.setStrokeWidth(2f);
             strokeThin.setColor(0xFF00E5FF);
             fill.setColor(0x55203A60);
+            accent.setColor(0xCC00E5FF);
             text.setColor(0xFFE8F4FF);
             text.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
             text.setTextAlign(Paint.Align.CENTER);
@@ -298,9 +357,10 @@ public class ControlEditorActivity extends Activity {
 
         private RectF rectOf(ControlConfig c) {
             float size = c.sizeFrac * minDim();
+            float wdt = size * c.aspect();
             float cx = c.cx * getWidth();
             float cy = c.cy * getHeight();
-            return new RectF(cx - size/2, cy - size/2, cx + size/2, cy + size/2);
+            return new RectF(cx - wdt/2, cy - size/2, cx + wdt/2, cy + size/2);
         }
 
         private RectF resizeHandleOf(ControlConfig c) {
@@ -312,7 +372,7 @@ public class ControlEditorActivity extends Activity {
         @Override
         protected void onDraw(Canvas cv) {
             super.onDraw(cv);
-            for (ControlConfig c : controls) drawControl(cv, c);
+            for (ControlConfig c : controls) if (editable(c)) drawControl(cv, c);
         }
 
         private void drawControl(Canvas cv, ControlConfig c) {
@@ -336,6 +396,12 @@ public class ControlEditorActivity extends Activity {
                 case ControlConfig.TYPE_JOYSTICK:
                     drawStickEditor(cv, r);
                     break;
+                case ControlConfig.TYPE_FIRE:
+                    ControlShapes.drawBullet(cv, r, path, fill, stroke, accent, selected);
+                    break;
+                case ControlConfig.TYPE_SCROLL:
+                    ControlShapes.drawScroll(cv, r, path, fill, stroke, accent, 0f, 0f, selected);
+                    break;
             }
 
             text.setTextSize(Math.max(10f, r.height() * 0.12f));
@@ -343,6 +409,10 @@ public class ControlEditorActivity extends Activity {
             String info;
             if (c.type == ControlConfig.TYPE_BUTTON) {
                 info = KeyMap.labelFor(c.keyCode);
+            } else if (c.type == ControlConfig.TYPE_FIRE) {
+                info = "DISPARO · " + c.sens + "×";
+            } else if (c.type == ControlConfig.TYPE_SCROLL) {
+                info = "SCROLL";
             } else {
                 info = KeyMap.labelFor(c.keyUp) + "/" + KeyMap.labelFor(c.keyDown)
                         + "/" + KeyMap.labelFor(c.keyLeft) + "/" + KeyMap.labelFor(c.keyRight);
@@ -423,6 +493,7 @@ public class ControlEditorActivity extends Activity {
                 case MotionEvent.ACTION_DOWN: {
                     for (int i = controls.size() - 1; i >= 0; i--) {
                         ControlConfig c = controls.get(i);
+                        if (!editable(c)) continue;
                         if (resizeHandleOf(c).contains(e.getX(), e.getY())) {
                             dragging = c;
                             isResizing = true;
@@ -436,6 +507,7 @@ public class ControlEditorActivity extends Activity {
                     }
                     for (int i = controls.size() - 1; i >= 0; i--) {
                         ControlConfig c = controls.get(i);
+                        if (!editable(c)) continue;
                         if (rectOf(c).contains(e.getX(), e.getY())) {
                             dragging = c;
                             isResizing = false;
@@ -449,7 +521,7 @@ public class ControlEditorActivity extends Activity {
                             longPressRunnable = () -> {
                                 if (longPressTarget == c && dragging == c) {
                                     new Ui.GameDialog(ControlEditorActivity.this, "Borrar control", Ui.RED)
-                                            .message("¿Borrar \"" + c.label + "\"?")
+                                            .message("¿Borrar \"" + nameOf(c) + "\"?")
                                             .button("Cancelar", Ui.NeonButton.SECONDARY, null)
                                             .button("Borrar", Ui.NeonButton.DANGER, d -> {
                                                 d.dismiss();
