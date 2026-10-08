@@ -12,6 +12,8 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
 
 import com.termux.x11.CmdEntryPoint;
 import com.termux.x11.ICmdEntryInterface;
@@ -350,7 +352,7 @@ public class SessionActivity extends Activity {
     private void showFloatingMenu() {
         final boolean controlsVisible = overlay != null && overlay.isVisible();
         final boolean keyboardVisible = keyboard != null && keyboard.getVisibility() == View.VISIBLE;
-        new Ui.GameDialog(this, "Opciones", Ui.CYAN)
+        final Ui.GameDialog dlg = new Ui.GameDialog(this, "Opciones", Ui.CYAN)
                 .button(controlsVisible ? "Ocultar controles" : "Mostrar controles",
                         Ui.NeonButton.PRIMARY,
                         d -> { d.dismiss(); if (overlay != null)
@@ -359,9 +361,65 @@ public class SessionActivity extends Activity {
                         Ui.NeonButton.SECONDARY,
                         d -> { d.dismiss(); if (keyboard != null)
                                 keyboard.setVisibility(keyboardVisible ? View.GONE : View.VISIBLE); })
-                .button("Salir del contenedor", Ui.NeonButton.DANGER,
-                        d -> { d.dismiss(); finish(); })
-                .show();
+                .button("Salir", Ui.NeonButton.DANGER,
+                        d -> { d.dismiss(); finish(); });
+        dlg.iconButton(Ui.G_GAMEPAD, Ui.MAGENTA, 48f, this::showProfilesPicker);
+        dlg.show();
+    }
+
+    private void showProfilesPicker() {
+        java.util.List<java.io.File> profiles = ControlConfigStore.listLocal(this);
+        if (profiles.isEmpty()) {
+            new Ui.GameDialog(this, "Sin perfiles", Ui.AMBER)
+                    .message("No hay perfiles guardados en /host-tmp/controls/.\n\n"
+                            + "Andá a Ajustes → Controles, armá un set y usá el botón de "
+                            + "exportar (arriba a la derecha).")
+                    .button("OK", Ui.NeonButton.PRIMARY, d -> d.dismiss())
+                    .show();
+            return;
+        }
+        final Ui.GameDialog dlg = new Ui.GameDialog(this, "Perfiles", Ui.MAGENTA);
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+
+        ScrollView sv = new ScrollView(this);
+        sv.setVerticalScrollBarEnabled(true);
+        int maxH = (int)(getResources().getDisplayMetrics().heightPixels * 0.5);
+        sv.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, maxH));
+
+        LinearLayout inner = new LinearLayout(this);
+        inner.setOrientation(LinearLayout.VERTICAL);
+        for (java.io.File f : profiles) {
+            final java.io.File profile = f;
+            Ui.NeonButton b = new Ui.NeonButton(this,
+                    ControlConfigStore.nameOf(f), Ui.NeonButton.SECONDARY);
+            b.setOnClickListener(v -> { dlg.dismiss(); applyProfile(profile); });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 44));
+            lp.bottomMargin = Ui.dp(this, 6);
+            inner.addView(b, lp);
+        }
+        sv.addView(inner);
+        col.addView(sv);
+
+        dlg.view(col);
+        dlg.button("Cancelar", Ui.NeonButton.DANGER, d -> d.dismiss());
+        dlg.show();
+    }
+
+    private void applyProfile(java.io.File f) {
+        java.util.List<ControlConfig> list = ControlConfigStore.importFrom(f);
+        if (list.isEmpty()) {
+            Ui.showToast(this, "Perfil vacío o inválido", Ui.RED);
+            return;
+        }
+        ControlConfigStore.save(this, container.name, list);
+        if (overlay != null) {
+            overlay.load(list);
+            overlay.setVisible(true);
+        }
+        Ui.showToast(this, "Perfil aplicado: " + ControlConfigStore.nameOf(f), Ui.GREEN);
     }
 
     private void boot() {

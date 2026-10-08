@@ -47,9 +47,18 @@ public class UpdateActivity extends Activity {
         String installedVersion, installedSha;
     }
 
-    private static final String[] TOOLS = {"spatha", "scutum", "lorica", "init-setup", "session", "sesar"};
+    private static final String[] TOOLS = {"spatha", "scutum", "lorica", "init-setup", "session", "sesar", "controls"};
     private static final String[] CATS  = {"icd", "json", "bionic", "glibc", "shell"};
+    private static class Profile {
+        String id, name, author, category, desc, file, sha256;
+        int count;
+        boolean installed;
+    }
     private final List<Item> items = new ArrayList<>();
+    private final List<Profile> profiles = new ArrayList<>();
+    private static final String[] CTRL_CATS = {"all", "fps", "racing", "voxel", "generic"};
+    private String activeCtrlCat = "all";
+
     private final Map<String, String> installedVersions = new LinkedHashMap<>();
     private final Map<String, String> installedShas = new LinkedHashMap<>();
     private String stubsRoot;
@@ -111,7 +120,7 @@ public class UpdateActivity extends Activity {
         tabRow = new LinearLayout(this);
         tabRow.setOrientation(LinearLayout.HORIZONTAL);
         tabRow.setPadding(dp(20), dp(14), dp(20), dp(4));
-        String[] names = {"SPATHA", "SCUTUM", "LORICA", "INIT", "SESS", "SESAR"};
+        String[] names = {"SPATHA", "SCUTUM", "LORICA", "INIT", "SESS", "SESAR", "CTRL"};
         tabs = new Ui.Chip[names.length];
         for (int i = 0; i < names.length; i++) {
             final String key = TOOLS[i];
@@ -284,7 +293,8 @@ public class UpdateActivity extends Activity {
                 JSONObject root = new JSONObject(json);
                 JSONObject stubs = root.getJSONObject("stubs");
                 String scutumStub = stubs.getString("scutum");
-                this.stubsRoot = scutumStub.substring(0, scutumStub.lastIndexOf('/'));
+                // scutumStub = ".../main/scutum/" -> stubsRoot = ".../main"
+                this.stubsRoot = scutumStub.replaceAll("/[^/]+/$", "");
 
                 JSONArray comps = root.getJSONArray("components");
                 for (int i = 0; i < comps.length(); i++) {
@@ -328,6 +338,27 @@ public class UpdateActivity extends Activity {
                     }
                     items.add(it);
                 }
+                // Leer tambien los controles
+                profiles.clear();
+                JSONArray ctrls = root.optJSONArray("controls");
+                if (ctrls != null) {
+                    java.io.File dir = ControlConfigStore.profilesDir(this);
+                    for (int i = 0; i < ctrls.length(); i++) {
+                        JSONObject o = ctrls.getJSONObject(i);
+                        Profile pr = new Profile();
+                        pr.id = o.getString("id");
+                        pr.name = o.getString("name");
+                        pr.author = o.optString("author", "?");
+                        pr.category = o.optString("category", "generic");
+                        pr.desc = o.optString("desc", "");
+                        pr.file = o.getString("file");
+                        pr.sha256 = o.getString("sha256");
+                        pr.count = o.optInt("count", 0);
+                        java.io.File local = new java.io.File(dir, pr.id + ".json");
+                        pr.installed = local.exists();
+                        profiles.add(pr);
+                    }
+                }
                 runOnUiThread(() -> { renderCategoryColumn(); renderContent(); });
             } catch (Throwable t) {
                 GladiatorLog.err(TAG, "reload", t);
@@ -343,21 +374,43 @@ public class UpdateActivity extends Activity {
 
     private Ui.Chip[] catChips;
 
+    private boolean hasComponentIn(String c) {
+        for (Item it : items)
+            if (it.component.equals(activeTool) && it.category.equals(c)) return true;
+        return false;
+    }
+    private boolean hasProfileIn(String c) {
+        if ("all".equals(c)) return !profiles.isEmpty();
+        for (Profile p : profiles) if (p.category.equals(c)) return true;
+        return false;
+    }
+
     private void renderCategoryColumn() {
         catCol.removeAllViews();
         catChips = new Ui.Chip[CATS.length];
-        for (int i = 0; i < CATS.length; i++) {
-            final String c = CATS[i];
-            boolean has = false;
-            for (Item it : items)
-                if (it.component.equals(activeTool) && it.category.equals(c)) { has = true; break; }
+        String[] cats = "controls".equals(activeTool) ? CTRL_CATS : CATS;
+        catChips = new Ui.Chip[cats.length];
+        for (int i = 0; i < cats.length; i++) {
+            final String c = cats[i];
+            boolean has = "controls".equals(activeTool)
+                    ? (hasProfileIn(c))
+                    : hasComponentIn(c);
             Ui.Chip chip = new Ui.Chip(this, c.toUpperCase());
-            chip.setChosen(c.equals(activeCategory));
+            boolean selected = "controls".equals(activeTool)
+                    ? c.equals(activeCtrlCat)
+                    : c.equals(activeCategory);
+            chip.setChosen(selected);
             if (!has) chip.setAlpha(0.35f);
+            final String[] finalCats = cats;
             chip.setOnClickListener(v -> {
-                activeCategory = c;
-                for (int j = 0; j < catChips.length; j++)
-                    catChips[j].setChosen(CATS[j].equals(activeCategory));
+                if ("controls".equals(activeTool)) activeCtrlCat = c;
+                else activeCategory = c;
+                for (int j = 0; j < catChips.length; j++) {
+                    boolean sel = "controls".equals(activeTool)
+                            ? finalCats[j].equals(activeCtrlCat)
+                            : finalCats[j].equals(activeCategory);
+                    catChips[j].setChosen(sel);
+                }
                 renderContent();
             });
             catChips[i] = chip;
@@ -370,6 +423,7 @@ public class UpdateActivity extends Activity {
 
     private void renderContent() {
         listBox.removeAllViews();
+        if ("controls".equals(activeTool)) { renderControlsContent(); return; }
         List<Item> shown = new ArrayList<>();
         for (Item it : items)
             if (it.component.equals(activeTool) && it.category.equals(activeCategory))
@@ -413,6 +467,230 @@ public class UpdateActivity extends Activity {
         updateBtn.setEnabled(anyPending && !busy);
     }
 
+    private void renderControlsContent() {
+        List<Profile> shown = new ArrayList<>();
+        for (Profile p : profiles) {
+            if ("all".equals(activeCtrlCat) || p.category.equals(activeCtrlCat)) shown.add(p);
+        }
+        java.util.Collections.sort(shown, (a, b) -> a.name.compareToIgnoreCase(b.name));
+
+        if (shown.isEmpty()) {
+            TextView t = Ui.bodyText(this, "Sin perfiles en esta categoría.", 13, Ui.MUTED);
+            t.setGravity(Gravity.CENTER);
+            listBox.addView(t);
+        } else {
+            for (Profile p : shown) {
+                View row = profileRow(p);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                lp.bottomMargin = dp(10);
+                listBox.addView(row, lp);
+            }
+        }
+        int installed = 0;
+        for (Profile p : profiles) if (p.installed) installed++;
+        summary.setText(profiles.size() + " perfiles · " + installed + " instalados");
+        summary.setTextColor(Ui.MAGENTA);
+        updateBtn.setEnabled(false);
+        busy = false;
+    }
+
+    private View profileRow(Profile pr) {
+        int accent = pr.installed ? Ui.GREEN : Ui.MAGENTA;
+        Ui.NeonCard card = new Ui.NeonCard(this, accent);
+        card.setClickable(false);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(14), dp(14), dp(14), dp(14));
+
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView name = Ui.label(this, pr.name, 15, Ui.TEXT, true, 0.03f);
+        head.addView(name, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        head.addView(Ui.badge(this, pr.installed ? "INSTALADO" : "DISPONIBLE", accent));
+        card.addView(head);
+
+        card.addView(Ui.vspace(this, 8));
+        LinearLayout meta = new LinearLayout(this);
+        meta.setOrientation(LinearLayout.HORIZONTAL);
+        meta.addView(Ui.badge(this, pr.category, Ui.CYAN));
+        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        mlp.leftMargin = dp(6);
+        meta.addView(Ui.badge(this, pr.author, Ui.VIOLET), mlp);
+        if (pr.count > 0) {
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            clp.leftMargin = dp(6);
+            meta.addView(Ui.badge(this, pr.count + " ctrl", Ui.MUTED), clp);
+        }
+        card.addView(meta);
+
+        if (pr.desc != null && !pr.desc.isEmpty()) {
+            card.addView(Ui.vspace(this, 8));
+            card.addView(Ui.bodyText(this, pr.desc, 12, Ui.TEXT_DIM));
+        }
+
+        card.addView(Ui.vspace(this, 10));
+        Ui.NeonButton btn = new Ui.NeonButton(this,
+                pr.installed ? "Reinstalar" : "Descargar",
+                pr.installed ? Ui.NeonButton.SECONDARY : Ui.NeonButton.PRIMARY);
+        final Profile target = pr;
+        btn.setOnClickListener(v -> downloadProfile(target));
+        card.addView(btn, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(42)));
+        return card;
+    }
+
+    private void showManualInstallDialog(Item it) {
+        android.widget.EditText verInput = Ui.input(this, "version (ej: 1.3.2)");
+        verInput.setText(it.version);
+        android.widget.EditText urlInput = Ui.input(this, "URL del archivo");
+        urlInput.setText(stubsRoot + "/" + it.component + "/" + it.file);
+
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.addView(Ui.label(this, "COMPONENTE", 10, Ui.MUTED, true, 0.2f));
+        body.addView(Ui.vspace(this, 6));
+        body.addView(Ui.bodyText(this, it.id, 13, Ui.TEXT));
+        body.addView(Ui.vspace(this, 14));
+        body.addView(Ui.label(this, "VERSION", 10, Ui.MUTED, true, 0.2f));
+        body.addView(Ui.vspace(this, 6));
+        body.addView(verInput);
+        body.addView(Ui.vspace(this, 14));
+        body.addView(Ui.label(this, "URL", 10, Ui.MUTED, true, 0.2f));
+        body.addView(Ui.vspace(this, 6));
+        body.addView(urlInput);
+        body.addView(Ui.vspace(this, 12));
+        body.addView(Ui.bodyText(this,
+                "Se descarga y aplica al reiniciar el contenedor. "
+                + "Si la version que pones es mayor que la instalada, no "
+                + "te va a saltar como actualizable en el proximo reload.",
+                11, Ui.MUTED));
+
+        new Ui.GameDialog(this, "Instalar version especifica", Ui.MAGENTA)
+                .view(body)
+                .keyboard()
+                .button("Cancelar", Ui.NeonButton.SECONDARY, d -> d.dismiss())
+                .button("Descargar", Ui.NeonButton.PRIMARY, d -> {
+                    String ver = verInput.getText().toString().trim();
+                    String url = urlInput.getText().toString().trim();
+                    if (ver.isEmpty() || url.isEmpty()) {
+                        Ui.showToast(this, "Falta version o URL", Ui.RED);
+                        return;
+                    }
+                    d.dismiss();
+                    manualInstall(it, ver, url);
+                })
+                .show();
+        verInput.requestFocus();
+    }
+
+    private void manualInstall(Item it, String ver, String url) {
+        Ui.showToast(this, "Descargando " + it.id + "…", Ui.CYAN);
+        new Thread(() -> {
+            File prefix = BootstrapInstaller.prefixDir(this);
+            File updates = new File(prefix, "tmp/updates");
+            File staging = new File(updates, "staging");
+            staging.mkdirs();
+            try {
+                File dst = new File(staging, it.id + ".bin");
+                httpDownload(url, dst);
+                String sha = sha256(dst);
+                if (sha == null) throw new RuntimeException("no pude hashear");
+
+                // Merge del installed.json en memoria + este componente
+                installedVersions.put(it.id, ver);
+                installedShas.put(it.id, sha);
+
+                // Escribimos installed.json NUEVO en staging. apply.sh solo lo mueve.
+                java.io.File instStaging = new java.io.File(staging, "installed.json");
+                java.io.FileOutputStream ifos = new java.io.FileOutputStream(instStaging);
+                ifos.write(serializeInstalledFrom(installedVersions, installedShas)
+                        .getBytes("UTF-8"));
+                ifos.close();
+
+                StringBuilder apply = new StringBuilder();
+                apply.append("#!/data/data/com.glads1/files/usr/bin/bash\n");
+                apply.append("set -e\n");
+                apply.append("PREFIX=\"${PREFIX:-/data/data/com.glads1/files/usr}\"\n");
+                apply.append("STAGING=\"$PREFIX/tmp/updates/staging\"\n");
+                apply.append("ROOTFS_LIB=\"$PREFIX/var/lib/proot-distro/containers/ubuntu/rootfs/usr/lib/aarch64-linux-gnu\"\n");
+                apply.append("apply_one() {\n");
+                apply.append("  local src=\"$1\" dst=\"$2\" mode=\"$3\"\n");
+                apply.append("  [ -f \"$src\" ] || return 0\n");
+                apply.append("  mkdir -p \"$(dirname \"$dst\")\"\n");
+                apply.append("  mv -f \"$src\" \"$dst\"\n");
+                apply.append("  chmod \"$mode\" \"$dst\"\n");
+                apply.append("}\n");
+                for (String[] pair : it.dests) {
+                    apply.append("apply_one \"$STAGING/").append(it.id).append(".bin\" ")
+                         .append("\"$PREFIX/").append(pair[0]).append("\" ")
+                         .append("\"").append(pair[1]).append("\"\n");
+                }
+                if (it.id.endsWith(".so") || it.id.contains(".so.")) {
+                    apply.append("[ -f \"$PREFIX/").append(it.dests.get(0)[0])
+                         .append("\" ] && mkdir -p \"$ROOTFS_LIB\" && ")
+                         .append("cp -f \"$PREFIX/").append(it.dests.get(0)[0])
+                         .append("\" \"$ROOTFS_LIB/").append(it.id).append("\"\n");
+                }
+                apply.append("mv -f \"$STAGING/installed.json\" \"$PREFIX/tmp/updates/installed.json\"\n");
+                apply.append("rm -rf \"$STAGING\"\n");
+                apply.append("rm -f \"$PREFIX/tmp/updates/apply.sh\"\n");
+
+                File applyFile = new File(updates, "apply.sh");
+                java.io.FileOutputStream fos = new java.io.FileOutputStream(applyFile);
+                fos.write(apply.toString().getBytes("UTF-8"));
+                fos.close();
+                applyFile.setExecutable(true, false);
+
+                final String fVer = ver;
+                runOnUiThread(() -> {
+                    Ui.showToast(this, "✓ " + it.id + " " + fVer + " listo (aplicar al reiniciar)", Ui.GREEN);
+                    it.version = fVer;
+                    it.sha256 = sha;
+                    it.status = ST_CURRENT;
+                    it.installedVersion = fVer;
+                    it.installedSha = sha;
+                    renderContent();
+                });
+            } catch (Throwable t) {
+                GladiatorLog.err(TAG, "manualInstall", t);
+                runOnUiThread(() -> Ui.showToast(this, "Error: " + t.getMessage(), Ui.RED));
+            }
+        }, "manual-install").start();
+    }
+
+    private void downloadProfile(Profile pr) {
+        Ui.showToast(this, "Descargando " + pr.name + "…", Ui.CYAN);
+        new Thread(() -> {
+            try {
+                String url = stubsRoot + "/controls/" + pr.file;
+                java.io.File dir = ControlConfigStore.profilesDir(this);
+                java.io.File tmpFile = new java.io.File(dir, pr.id + ".json.tmp");
+                httpDownload(url, tmpFile);
+                String h = sha256(tmpFile);
+                if (h == null || !h.equalsIgnoreCase(pr.sha256)) {
+                    tmpFile.delete();
+                    throw new RuntimeException("sha256 no coincide");
+                }
+                java.io.File dst = new java.io.File(dir, pr.id + ".json");
+                if (dst.exists()) dst.delete();
+                if (!tmpFile.renameTo(dst)) throw new RuntimeException("rename falló");
+                pr.installed = true;
+                runOnUiThread(() -> {
+                    Ui.showToast(this, "Perfil listo: " + pr.name, Ui.GREEN);
+                    renderContent();
+                });
+            } catch (Throwable t) {
+                GladiatorLog.err(TAG, "downloadProfile", t);
+                runOnUiThread(() -> Ui.showToast(this,
+                        "Error: " + t.getMessage(), Ui.RED));
+            }
+        }, "profile-dl").start();
+    }
+
     private View itemRow(Item it) {
         int accent = it.status == ST_CURRENT ? Ui.GREEN
                 : it.status == ST_OLD ? Ui.AMBER : Ui.RED;
@@ -432,6 +710,12 @@ public class UpdateActivity extends Activity {
         String st = it.status == ST_CURRENT ? "AL DÍA"
                 : it.status == ST_OLD ? "ACTUALIZABLE" : "FALTA";
         head.addView(Ui.badge(this, st, accent));
+        View manual = Ui.iconButton(this, Ui.G_PLUS, Ui.MAGENTA, 32);
+        LinearLayout.LayoutParams mlp2 = new LinearLayout.LayoutParams(dp(32), dp(32));
+        mlp2.leftMargin = dp(6);
+        final Item target = it;
+        manual.setOnClickListener(v -> showManualInstallDialog(target));
+        head.addView(manual, mlp2);
         card.addView(head);
 
         card.addView(Ui.vspace(this, 8));
@@ -461,15 +745,23 @@ public class UpdateActivity extends Activity {
     // ============================================================ apply
 
     private void startUpdate() {
-        if (busy) return;
+        // defensivo: si busy quedo pegado por un render fallido, liberarlo
+        if (busy) {
+            GladiatorLog.log(TAG, "startUpdate: busy estaba pegado, lo libero");
+            busy = false;
+        }
         List<Item> pending = new ArrayList<>();
         for (Item it : items) if (it.status != ST_CURRENT) pending.add(it);
-        if (pending.isEmpty()) return;
+        if (pending.isEmpty()) {
+            Ui.showToast(this, "Nada para actualizar", Ui.AMBER);
+            return;
+        }
 
         busy = true;
         updateBtn.setEnabled(false);
         summary.setText("Descargando 0/" + pending.size() + "…");
         summary.setTextColor(Ui.CYAN);
+        Ui.showToast(this, "Actualizando " + pending.size() + " componente(s)…", Ui.CYAN);
 
         new Thread(() -> doUpdate(pending), "store-update").start();
     }
@@ -559,6 +851,7 @@ public class UpdateActivity extends Activity {
             if (fFail == 0) {
                 summary.setText(fOk + " listo(s). Reiniciá el contenedor.");
                 summary.setTextColor(Ui.GREEN);
+                Ui.showToast(this, "✓ " + fOk + " componente(s) actualizado(s)", Ui.GREEN);
                 new Ui.GameDialog(this, "Actualización lista", Ui.GREEN)
                         .message(fOk + " componente(s) descargado(s) y verificados.\n\n"
                                 + "Cerrá la sesión actual y volvé a abrir el contenedor.")
@@ -567,8 +860,24 @@ public class UpdateActivity extends Activity {
             } else {
                 summary.setText(fOk + " ok · " + fFail + " fallo(s)");
                 summary.setTextColor(Ui.RED);
+                Ui.showToast(this, fFail + " fallo(s) al descargar", Ui.RED);
             }
         });
+    }
+
+    private String serializeInstalledFrom(Map<String, String> vers, Map<String, String> shas) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\n  \"applied\": {\n");
+        int i = 0, n = vers.size();
+        for (Map.Entry<String, String> e : vers.entrySet()) {
+            sb.append("    \"").append(e.getKey()).append("\": {")
+              .append("\"version\": \"").append(e.getValue()).append("\", ")
+              .append("\"sha256\": \"").append(shas.containsKey(e.getKey()) ? shas.get(e.getKey()) : "").append("\"}");
+            if (++i < n) sb.append(",");
+            sb.append("\n");
+        }
+        sb.append("  }\n}\n");
+        return sb.toString();
     }
 
     private String serializeInstalled(List<Item> ok) {
@@ -601,6 +910,9 @@ public class UpdateActivity extends Activity {
         c.setConnectTimeout(TIMEOUT_MS);
         c.setReadTimeout(TIMEOUT_MS);
         c.setRequestProperty("User-Agent", "Gladiator/1.3.1");
+        c.setUseCaches(false);
+        c.setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate");
+        c.setRequestProperty("Pragma", "no-cache");
         try {
             int code = c.getResponseCode();
             if (code != 200) throw new RuntimeException("HTTP " + code);
@@ -619,6 +931,9 @@ public class UpdateActivity extends Activity {
         c.setConnectTimeout(TIMEOUT_MS);
         c.setReadTimeout(TIMEOUT_MS);
         c.setRequestProperty("User-Agent", "Gladiator/1.3.1");
+        c.setUseCaches(false);
+        c.setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate");
+        c.setRequestProperty("Pragma", "no-cache");
         try {
             int code = c.getResponseCode();
             if (code != 200) throw new RuntimeException("HTTP " + code);

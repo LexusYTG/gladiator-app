@@ -255,7 +255,7 @@ public final class Ui {
     }
 
     public static final int G_PLUS = 0, G_GEAR = 1, G_POWER = 2, G_BACK = 3,
-            G_TRASH = 4, G_PLAY = 5, G_HEX = 6;
+            G_TRASH = 4, G_PLAY = 5, G_HEX = 6, G_EXPORT = 7, G_GAMEPAD = 8;
 
     public static class GlyphView extends View {
         private final int type;
@@ -330,6 +330,29 @@ public final class Ui {
                     path.close();
                     p.setStyle(Paint.Style.FILL_AND_STROKE);
                     cv.drawPath(path, p);
+                    break;
+                case G_EXPORT:
+                    // flecha hacia arriba saliendo de una caja
+                    cv.drawLine(cx - r * 0.6f, cy + r * 0.15f, cx + r * 0.6f, cy + r * 0.15f, p);
+                    cv.drawLine(cx - r * 0.6f, cy + r * 0.15f, cx - r * 0.6f, cy + r * 0.6f, p);
+                    cv.drawLine(cx + r * 0.6f, cy + r * 0.15f, cx + r * 0.6f, cy + r * 0.6f, p);
+                    cv.drawLine(cx - r * 0.6f, cy + r * 0.6f, cx + r * 0.6f, cy + r * 0.6f, p);
+                    cv.drawLine(cx, cy - r * 0.7f, cx, cy + r * 0.15f, p);
+                    path.reset();
+                    path.moveTo(cx - r * 0.28f, cy - r * 0.4f);
+                    path.lineTo(cx, cy - r * 0.72f);
+                    path.lineTo(cx + r * 0.28f, cy - r * 0.4f);
+                    cv.drawPath(path, p);
+                    break;
+                case G_GAMEPAD:
+                    rect.set(cx - r * 0.72f, cy - r * 0.42f,
+                             cx + r * 0.72f, cy + r * 0.42f);
+                    cv.drawRoundRect(rect, r * 0.32f, r * 0.32f, p);
+                    cv.drawLine(cx - r * 0.42f, cy - r * 0.10f,
+                                cx - r * 0.42f, cy + r * 0.10f, p);
+                    cv.drawLine(cx - r * 0.52f, cy, cx - r * 0.32f, cy, p);
+                    cv.drawCircle(cx + r * 0.42f, cy - r * 0.06f, r * 0.06f, p);
+                    cv.drawCircle(cx + r * 0.42f, cy + r * 0.14f, r * 0.06f, p);
                     break;
                 case G_HEX:
                 default:
@@ -984,6 +1007,22 @@ public final class Ui {
             return this;
         }
 
+        /** IconButton dentro de la fila de botones. */
+        public GameDialog iconButton(int glyph, int accent, float sizeDp, final Runnable action) {
+            if (buttons.getParent() == null) {
+                card.addView(vspace(act, 18));
+                card.addView(buttons, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            }
+            IconButton b = new IconButton(act, glyph, accent);
+            b.setOnClickListener(v -> { if (action != null) action.run(); });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    dp(act, sizeDp), dp(act, sizeDp));
+            if (buttons.getChildCount() > 0) lp.leftMargin = dp(act, 10);
+            buttons.addView(b, lp);
+            return this;
+        }
+
         public GameDialog button(String label, int style, final Action action) {
             if (buttons.getParent() == null) {
                 card.addView(vspace(act, 18));
@@ -1122,4 +1161,38 @@ public final class Ui {
             }
         }
     }
+
+    /** Notificacion flotante arriba a la derecha. Se va sola a los 3s. */
+    public static void showToast(Activity a, String msg, int accent) {
+        View decorView = a.getWindow().getDecorView();
+        if (!(decorView instanceof ViewGroup)) return;
+        final ViewGroup root = (ViewGroup) decorView;
+
+        LinearLayout box = new LinearLayout(a);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(a, 14), dp(a, 12), dp(a, 14), dp(a, 12));
+        box.setBackground(new Chamfer(dp(a, 10), dp(a, 1.5f))
+                .fill(0xF0121C38, 0xF00A1226).stroke(withAlpha(accent, 210))
+                .glow(accent).accentCuts(accent));
+        box.addView(bodyText(a, msg, 12, TEXT));
+
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                dp(a, 300), ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.gravity = Gravity.TOP | Gravity.END;
+        lp.topMargin = dp(a, 44);
+        lp.rightMargin = dp(a, 20);
+        root.addView(box, lp);
+
+        box.setAlpha(0f);
+        box.setTranslationX(dp(a, 80));
+        box.animate().alpha(1f).translationX(0f).setDuration(220)
+                .withEndAction(() -> box.postDelayed(() -> {
+                    box.animate().alpha(0f).translationX(dp(a, 80))
+                            .setDuration(220)
+                            .withEndAction(() -> root.removeView(box))
+                            .start();
+                }, 3000))
+                .start();
+    }
+
 }

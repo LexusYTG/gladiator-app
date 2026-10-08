@@ -48,6 +48,8 @@ public class PrefixFetcher {
             conn.setConnectTimeout(TIMEOUT_MS);
             conn.setReadTimeout(TIMEOUT_MS);
             conn.setRequestProperty("User-Agent", "Gladiator/1.0");
+            conn.setUseCaches(false);
+            conn.setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate");
             conn.connect();
             int code = conn.getResponseCode();
             if (code != 200) {

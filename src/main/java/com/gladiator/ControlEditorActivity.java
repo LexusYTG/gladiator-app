@@ -70,6 +70,10 @@ public class ControlEditorActivity extends Activity {
         tlp.leftMargin = dp(10);
         header.addView(titles, tlp);
 
+        View exportBtn = Ui.iconButton(this, Ui.G_EXPORT, Ui.GREEN, 40);
+        exportBtn.setOnClickListener(v -> showExportDialog());
+        header.addView(exportBtn);
+
         FrameLayout.LayoutParams hlp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         hlp.gravity = Gravity.TOP;
@@ -144,6 +148,74 @@ public class ControlEditorActivity extends Activity {
                 .button("Descartar", Ui.NeonButton.SECONDARY, d -> { d.dismiss(); finish(); })
                 .button("Guardar", Ui.NeonButton.PRIMARY, d -> { d.dismiss(); saveAndExit(); })
                 .show();
+    }
+
+    /** Copia el perfil a /storage/emulated/0/GladiatorControls. Devuelve la ruta o null. */
+    private String exportToExternal(String name) {
+        try {
+            java.io.File dir = new java.io.File(
+                    android.os.Environment.getExternalStorageDirectory(), "GladiatorControls");
+            if (!dir.exists() && !dir.mkdirs()) return null;
+            java.io.File out = new java.io.File(dir,
+                    name.replaceAll("[^a-zA-Z0-9._\\-]", "_") + ".json");
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(out);
+            fos.write(ControlConfigStore.toJson(controls).getBytes("UTF-8"));
+            fos.close();
+            // visible desde USB / gestor de archivos
+            android.media.MediaScannerConnection.scanFile(this,
+                    new String[]{out.getAbsolutePath()}, new String[]{"application/json"}, null);
+            return out.getAbsolutePath();
+        } catch (Throwable t) {
+            GladiatorLog.err("ControlEditor", "exportToExternal", t);
+            return null;
+        }
+    }
+
+    private void showExportDialog() {
+        final EditText input = Ui.input(this, "nombre del perfil");
+        java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat(
+                "yyyyMMdd-HHmm", java.util.Locale.US);
+        input.setText("perfil-" + fmt.format(new java.util.Date()));
+
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.addView(Ui.label(this, "NOMBRE", 10, Ui.MUTED, true, 0.2f));
+        body.addView(Ui.vspace(this, 8));
+        body.addView(input, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        body.addView(Ui.vspace(this, 12));
+        body.addView(Ui.bodyText(this,
+                "Se guarda como .json en /host-tmp/controls/. "
+                + "Desde ahí podés copiarlo, versionarlo o subirlo al store.",
+                11, Ui.MUTED));
+
+        new Ui.GameDialog(this, "Exportar perfil", Ui.GREEN)
+                .view(body)
+                .keyboard()
+                .button("Cancelar", Ui.NeonButton.SECONDARY, null)
+                .button("Exportar", Ui.NeonButton.PRIMARY, d -> {
+                    String name = input.getText().toString().trim();
+                    if (name.isEmpty()) name = "perfil";
+                    // copia local (bindeada al container)
+                    boolean okLocal = ControlConfigStore.export(this, name, controls);
+                    // copia externa visible al usuario
+                    String extPath = exportToExternal(name);
+                    d.dismiss();
+                    if (!okLocal && extPath == null) {
+                        new Ui.GameDialog(this, "Error", Ui.RED)
+                                .message("No se pudo escribir el perfil en ningún destino.")
+                                .button("OK", Ui.NeonButton.PRIMARY, dd -> dd.dismiss())
+                                .show();
+                        return;
+                    }
+                    String msg = extPath != null
+                            ? "Controles guardados en\n" + extPath
+                            : "Controles guardados en\n" + ControlConfigStore.profilesDir(this).getAbsolutePath();
+                    Ui.showToast(ControlEditorActivity.this, msg,
+                            extPath != null ? Ui.GREEN : Ui.AMBER);
+                })
+                .show();
+        input.requestFocus();
     }
 
     private void saveAndExit() {
