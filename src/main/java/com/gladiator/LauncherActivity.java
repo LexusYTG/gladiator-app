@@ -3,6 +3,12 @@ package com.gladiator;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.opengl.EGL14;
+import android.opengl.EGLConfig;
+import android.opengl.EGLContext;
+import android.opengl.EGLDisplay;
+import android.opengl.EGLSurface;
+import android.opengl.GLES20;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.view.Gravity;
@@ -96,75 +102,201 @@ public class LauncherActivity extends Activity {
     }
 
     private void showWarning() {
-        String txt =
-                "GLADIATOR ES EXPERIMENTAL.\n\n"
+        showWizardPage(0);
+    }
 
-              + "BETA\n"
-              + "Esta es la version 1.0 beta. El proyecto entero esta en desarrollo "
-              + "activo. Cualquier error puede ser corregido en versiones futuras, "
-              + "pero no se garantiza soporte ni compatibilidad. Probalo bajo tu "
-              + "propio riesgo.\n\n"
+    private void showWizardPage(int step) {
+        switch (step) {
+            case 0: wizardWarnings(); break;
+            case 1: wizardCompat();   break;
+            case 2: wizardGpuTest();  break;
+            case 3: wizardData();     break;
+            case 4: wizardThanks();   break;
+        }
+    }
 
-              + "COMPATIBILIDAD\n"
-              + "Solo probado con GPU Mali (Mali-G52 MC2). No preparado para Adreno, "
-              + "PowerVR, otros Mali ni otros GPUs. En otro hardware puede no arrancar.\n\n"
-
-              + "PESO Y DESCARGA\n"
-              + "El entorno completo puede ocupar entre 2 y 3 GB de almacenamiento. "
-              + "Asegurate de tener espacio libre suficiente.\n\n"
-              + "La app descarga paquetes desde internet la primera vez que arranca "
-              + "el container: Ubuntu base, JWM (window manager), XTerm (terminal), "
-              + "fuentes y otras dependencias. Eso consume datos moviles si no estas "
-              + "en WiFi.\n\n"
-
-              + "TIEMPO DE ARRANQUE\n"
-              + "El primer arranque de cada entorno puede tardar hasta 10 minutos, "
-              + "dependiendo de tu conexion. La pantalla de carga muestra un "
-              + "cronometro: verde = normal, naranja = esta tardando, rojo = "
-              + "probablemente se colgo o se corto la red.\n\n"
-
-              + "ARRANQUE\n"
-              + "Pueden aparecer fallos criticos al iniciar el entorno. Si la sesion "
-              + "no arranca: forzar cierre de la app desde Ajustes del sistema y volver "
-              + "a entrar al container.\n\n"
-
-              + "AJUSTES\n"
-              + "La mayoria de las opciones del panel de Ajustes no se aplican por "
-              + "fallos conocidos en el entorno X11.\n\n"
-
-              + "RENDIMIENTO\n"
-              + "El rendimiento puede no estar asegurado. Las herramientas que se "
-              + "usan (Scutum, Spatha, Sesar) estan en estado experimental y en "
-              + "desarrollo activo. Los FPS y la fluidez dependen del dispositivo, "
-              + "la pista y los shaders del juego.\n\n"
-
-              + "COMPONENTES EXPERIMENTALES\n"
-              + "Scutum (GLES), Spatha (Vulkan) y Sesar (escritorio) son proyectos "
-              + "en desarrollo continuo. Bugs visuales, cuelgues y comportamientos "
-              + "inesperados son esperables. No hay garantia de que las aplicaciones "
-              + "corran sin problemas.\n\n"
-
-              + "CONFIGURACION\n"
-              + "Revisa la seccion de Ajustes para personalizar el entorno si no "
-              + "te gusta como esta configurado: resolucion, profundidad de color, "
-              + "calidad grafica, modo de mouse (botones de volumen vs gestos), y "
-              + "controles en pantalla.";
-
+    private android.widget.ScrollView scrollable(String txt) {
         android.widget.ScrollView sv = new android.widget.ScrollView(this);
         sv.setVerticalScrollBarEnabled(true);
         int maxH = (int)(getResources().getDisplayMetrics().heightPixels * 0.6);
         sv.setLayoutParams(new android.widget.LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, maxH));
-
         LinearLayout inner = new LinearLayout(this);
         inner.setOrientation(LinearLayout.VERTICAL);
         inner.addView(Ui.bodyText(this, txt, 13, Ui.TEXT_DIM));
         sv.addView(inner);
+        return sv;
+    }
 
-        new Ui.GameDialog(this, "Aviso // Importante", Ui.AMBER)
-                .view(sv)
-                .cancelable(false)
-                .button("Entendido", Ui.NeonButton.PRIMARY, d -> {
+    private Ui.GameDialog wizardDialog(String title, int accent) {
+        return new Ui.GameDialog(this, title, accent).cancelable(false);
+    }
+
+    private void wizardWarnings() {
+        String txt =
+                "GLADIATOR ES EXPERIMENTAL.\n\n"
+              + "ALMACENAMIENTO\n"
+              + "El entorno completo ocupa entre 2 y 3 GB. Necesitas ese espacio "
+              + "libre en el dispositivo.\n\n"
+              + "ESTABILIDAD\n"
+              + "El proyecto esta en desarrollo activo. Pueden aparecer cuelgues, "
+              + "reinicios inesperados de la sesion o fallos al arrancar el entorno. "
+              + "Si la sesion no arranca, forzar cierre de la app y volver a entrar.\n\n"
+              + "COMPATIBILIDAD\n"
+              + "Solo probado sobre GPU Mali (Mali-G52 MC2). No preparado para Adreno, "
+              + "PowerVR ni otras familias. En otro hardware puede no arrancar.";
+        wizardDialog("Aviso // Importante", Ui.AMBER)
+                .view(scrollable(txt))
+                .button("Siguiente", Ui.NeonButton.PRIMARY, d -> {
+                    d.dismiss();
+                    showWizardPage(1);
+                })
+                .show();
+    }
+
+    private void wizardCompat() {
+        String txt =
+                "COMPATIBILIDAD OPENGL\n\n"
+              + "Gladiator traduce OpenGL de escritorio sobre OpenGL ES del device.\n\n"
+              + "Soporta hasta OpenGL 4.3 core. La traduccion puede ser inestable "
+              + "en aplicaciones que usen features muy modernas (bindless, sparse, "
+              + "clip control). El rendimiento puede no ser optimo comparado con un "
+              + "driver nativo.\n\n"
+              + "NO se hace emulacion por CPU. Si la GPU del device es compatible "
+              + "con la version de OpenGL que la aplicacion pide, la aplicacion se "
+              + "ejecuta sobre la GPU. La traduccion es solo de API, no de trabajo.\n\n"
+              + "Si la aplicacion pide una version mayor a la que el backend puede "
+              + "expresar, Gladiator la rechaza en lugar de dar un resultado incorrecto.";
+        wizardDialog("Compatibilidad", Ui.CYAN)
+                .view(scrollable(txt))
+                .button("Siguiente", Ui.NeonButton.PRIMARY, d -> {
+                    d.dismiss();
+                    showWizardPage(2);
+                })
+                .show();
+    }
+
+    private void wizardGpuTest() {
+        // Queries reales del device: GLES via EGL14, Vulkan via API Java.
+        String glesInfo = probeGles();
+        String vkInfo   = probeVulkan();
+
+        String txt =
+                "TEST DE GPU\n\n"
+              + "OpenGL ES del device:\n"
+              + glesInfo + "\n\n"
+              + "Vulkan del device:\n"
+              + vkInfo + "\n\n"
+              + "Dentro del entorno, Gladiator reportara:\n"
+              + "  OpenGL hasta 4.3 core (via Lorica)\n"
+              + "  Vulkan 1.0 / 1.1 / 1.2 (via Spatha)\n\n"
+              + "El test completo se corre al arrancar el entorno.";
+        wizardDialog("Test de GPU", Ui.GREEN)
+                .view(scrollable(txt))
+                .button("Siguiente", Ui.NeonButton.PRIMARY, d -> {
+                    d.dismiss();
+                    showWizardPage(3);
+                })
+                .show();
+    }
+
+    private String probeGles() {
+        EGLDisplay dpy = null;
+        EGLContext ctx = null;
+        EGLSurface surf = null;
+        try {
+            dpy = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
+            int[] ver = new int[2];
+            EGL14.eglInitialize(dpy, ver, 0, ver, 1);
+            int[] attrs = {
+                    EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
+                    EGL14.EGL_SURFACE_TYPE, EGL14.EGL_PBUFFER_BIT,
+                    EGL14.EGL_NONE
+            };
+            EGLConfig[] cfg = new EGLConfig[1];
+            int[] n = new int[1];
+            EGL14.eglChooseConfig(dpy, attrs, 0, cfg, 0, 1, n, 0);
+            int[] cattr = { EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE };
+            ctx = EGL14.eglCreateContext(dpy, cfg[0], EGL14.EGL_NO_CONTEXT, cattr, 0);
+            int[] sattr = { EGL14.EGL_WIDTH, 1, EGL14.EGL_HEIGHT, 1, EGL14.EGL_NONE };
+            surf = EGL14.eglCreatePbufferSurface(dpy, cfg[0], sattr, 0);
+            EGL14.eglMakeCurrent(dpy, surf, surf, ctx);
+            String vendor = GLES20.glGetString(GLES20.GL_VENDOR);
+            String renderer = GLES20.glGetString(GLES20.GL_RENDERER);
+            String version = GLES20.glGetString(GLES20.GL_VERSION);
+            String exts = GLES20.glGetString(GLES20.GL_EXTENSIONS);
+            int nExt = (exts == null) ? 0 : exts.split(" ").length;
+            return "  Vendor:   " + (vendor == null ? "-" : vendor)
+                 + "\n  Renderer: " + (renderer == null ? "-" : renderer)
+                 + "\n  Version:  " + (version == null ? "-" : version)
+                 + "\n  Extensions: " + nExt;
+        } catch (Throwable t) {
+            return "  no disponible (" + t.getMessage() + ")";
+        } finally {
+            try { if (dpy != null && surf != null) EGL14.eglDestroySurface(dpy, surf); } catch (Throwable ignored) {}
+            try { if (dpy != null && ctx != null)  EGL14.eglDestroyContext(dpy, ctx); }  catch (Throwable ignored) {}
+            try { if (dpy != null) EGL14.eglTerminate(dpy); } catch (Throwable ignored) {}
+        }
+    }
+
+    private String probeVulkan() {
+        if (android.os.Build.VERSION.SDK_INT < 24) return "  requiere Android 7+";
+        try {
+            android.content.pm.PackageManager pm = getPackageManager();
+            boolean hasVk = pm.hasSystemFeature(
+                    android.content.pm.PackageManager.FEATURE_VULKAN_HARDWARE_VERSION);
+            if (!hasVk) return "  no soportado por el device";
+            int vkVer = 0;
+            try {
+                java.lang.reflect.Method m = android.os.Build.class
+                        .getMethod("getVulkanVersion");
+                Object r = m.invoke(null);
+                if (r instanceof Integer) vkVer = (Integer) r;
+            } catch (Throwable ignored) {}
+            if (vkVer == 0) return "  Vulkan soportado (version no consultable)";
+            return "  Vulkan " + ((vkVer >> 22) & 0x3FF) + "."
+                             + ((vkVer >> 12) & 0x3FF) + "."
+                             + (vkVer & 0xFFF);
+        } catch (Throwable t) {
+            return "  no disponible";
+        }
+    }
+
+    private void wizardData() {
+        String txt =
+                "DATOS Y BATERIA\n\n"
+              + "DATOS\n"
+              + "La primera vez que arranca el container, la app descarga paquetes "
+              + "desde internet (Ubuntu base, JWM, XTerm, fuentes y dependencias). "
+              + "Eso consume datos moviles si no estas en WiFi.\n\n"
+              + "Una vez armado el container, la app funciona sin red.\n\n"
+              + "BATERIA\n"
+              + "El entorno ejecuta un servidor X, un container y daemons de "
+              + "traduccion grafica. El consumo es mayor que una app normal.\n\n"
+              + "El primer arranque de cada entorno puede tardar hasta 10 minutos "
+              + "y calentar el dispositivo. Se recomienda tenerlo enchufado.\n\n"
+              + "La app no tiene publicidad, ni analiticas, ni telemetria.";
+        wizardDialog("Datos y bateria", Ui.MAGENTA)
+                .view(scrollable(txt))
+                .button("Siguiente", Ui.NeonButton.PRIMARY, d -> {
+                    d.dismiss();
+                    showWizardPage(4);
+                })
+                .show();
+    }
+
+    private void wizardThanks() {
+        String txt =
+                "Gracias por usar Gladiator.\n\n"
+              + "El proyecto es de codigo abierto (GPL-3.0). Todo su codigo, "
+              + "incluyendo Scutum, Spatha, Sesar y Lorica, esta disponible en "
+              + "GitHub.\n\n"
+              + "Cualquier componente puede usarse por separado dentro de Termux "
+              + "standalone. No hace falta la app para correr los binarios.\n\n"
+              + "github.com/LexusYTG";
+        wizardDialog("Bienvenido", Ui.CYAN)
+                .view(scrollable(txt))
+                .button("Empezar", Ui.NeonButton.PRIMARY, d -> {
                     prefs.edit().putBoolean(KEY_FIRST_RUN, false).apply();
                     d.dismiss();
                     showMainMenu();
