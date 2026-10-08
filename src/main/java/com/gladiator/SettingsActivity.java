@@ -129,6 +129,23 @@ public class SettingsActivity extends Activity {
         ctrlLp.topMargin = dp(24);
         list.addView(ctrlCard, ctrlLp);
 
+        LinearLayout updCard = Ui.card(this, Ui.GREEN);
+        updCard.addView(Ui.label(this, "ACTUALIZACIONES", 10, Ui.MUTED, true, 0.2f));
+        updCard.addView(Ui.vspace(this, 10));
+        updCard.addView(Ui.bodyText(this,
+                "Descarga versiones nuevas de Scutum, Spatha y Lorica desde el store. "
+                + "Se aplican al iniciar la próxima sesión.", 11, Ui.MUTED));
+        updCard.addView(Ui.vspace(this, 10));
+        Ui.NeonButton updBtn = new Ui.NeonButton(this, "Abrir store", Ui.NeonButton.PRIMARY);
+        updBtn.setOnClickListener(v -> startActivity(
+                new android.content.Intent(SettingsActivity.this, UpdateActivity.class)));
+        updCard.addView(updBtn, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(48)));
+        LinearLayout.LayoutParams updLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        updLp.topMargin = dp(24);
+        list.addView(updCard, updLp);
+
         TextView hint = Ui.bodyText(this,
                 "Los cambios se aplican al iniciar la próxima sesión.", 12, Ui.MUTED);
         hint.setGravity(Gravity.CENTER);

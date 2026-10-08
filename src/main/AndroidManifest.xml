@@ -53,6 +53,13 @@
             android:theme="@android:style/Theme.Material.NoActionBar"
             android:configChanges="orientation|screenSize|keyboardHidden" />
 
+        <activity
+            android:name=".UpdateActivity"
+            android:screenOrientation="landscape"
+            android:exported="false"
+            android:theme="@android:style/Theme.Material.NoActionBar"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+
         <service
             android:name=".XServerService"
             android:exported="false"
